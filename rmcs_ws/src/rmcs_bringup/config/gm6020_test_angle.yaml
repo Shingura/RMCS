@@ -6,6 +6,7 @@ rmcs_executor:
       - rmcs_core::controller::GM6020TestController -> gm6020_joystick
       - rmcs_core::controller::pid::PidController -> gm6020_angle_pid
       - rmcs_core::controller::pid::PidController -> gm6020_velocity_pid
+      - rmcs_core::broadcaster::ValueBroadcaster -> value_broadcaster
 
 gm6020_hardware:
   ros__parameters:
@@ -16,7 +17,7 @@ gm6020_joystick:
   ros__parameters:
     mode: angle
     max_velocity: 5.0
-    max_angular_velocity: 3.0
+    max_angular_velocity: 5.0
 
 # 外环：把角度误差换算成"应该跑多快"
 gm6020_angle_pid:
@@ -24,11 +25,11 @@ gm6020_angle_pid:
     measurement: /motor/angle
     setpoint: /motor/control_target
     control: /motor/control_velocity
-    kp: 5.0
+    kp: 1.5
     ki: 0.0
-    kd: 0.0
-    output_max: 5.0
-    output_min: -5.0
+    kd: 0.15
+    output_max: 10.0
+    output_min: -10.0
 
 # 内环：把速度误差换算成力矩
 gm6020_velocity_pid:
@@ -36,8 +37,17 @@ gm6020_velocity_pid:
     measurement: /motor/velocity_filtered
     setpoint: /motor/control_velocity
     control: /motor/control_torque
-    kp: 0.14
-    ki: 0.0003
-    kd: 0.0
+    kp: 0.025
+    ki: 0.002
+    kd: 0.0001
     output_max: 1.5
     output_min: -1.5
+
+value_broadcaster:
+  ros__parameters:
+    forward_list:
+      - /motor/angle
+      - /motor/control_target
+      - /motor/control_velocity
+      - /motor/velocity_filtered
+      - /motor/control_torque

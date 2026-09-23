@@ -5,6 +5,7 @@ rmcs_executor:
       - rmcs_core::hardware::GM6020Test -> gm6020_hardware
       - rmcs_core::controller::GM6020TestController -> gm6020_joystick
       - rmcs_core::controller::pid::PidController -> gm6020_velocity_pid
+      - rmcs_core::broadcaster::ValueBroadcaster -> value_broadcaster
 
 gm6020_hardware:
   ros__parameters:
@@ -22,8 +23,18 @@ gm6020_velocity_pid:
     measurement: /motor/velocity_filtered
     setpoint: /motor/control_target
     control: /motor/control_torque
-    kp: 0.14
-    ki: 0.0003
-    kd: 0.0
+    kp: 0.025
+    ki: 0.002
+    kd: 0.0001
+    integral_max: 5.0
+    integral_min: -50.0
     output_max: 1.5
     output_min: -1.5
+
+value_broadcaster:
+  ros__parameters:
+    forward_list:
+      - /motor/control_target
+      - /motor/velocity_filtered
+      - /motor/control_torque
+

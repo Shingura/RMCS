@@ -72,6 +72,12 @@ class GM6020Test : public rmcs_executor::Component, public rclcpp::Node, public 
         {
             auto builder = board_ -> start_transmit();
 
+            RCLCPP_INFO_THROTTLE(
+            get_logger(), *get_clock(), 500,
+            "id=%d  send_id=0x%lX  torque=%.3f  raw=%u",
+            motor_.id(), (unsigned long)motor_.send_id(),
+            motor_.control_torque(), motor_.generate_command().data);
+
             builder.can_transmit(Spec::kCans.kCan1, 
             {
                 .can_id = motor_.send_id(),                                // 标识符，表明电流控制（参考 GM6020 文档）
@@ -105,8 +111,8 @@ class GM6020Test : public rmcs_executor::Component, public rclcpp::Node, public 
         device::Dr16 dr16_;
         std::unique_ptr<device::RemoteControl> remote_control_;
 
-        // 设置低通滤波器截止频率为 100Hz，采样频率为 1000Hz
-        filter::LowPassFilter<1> velocity_filter_{100.0, 1000.0};
+        // 设置低通滤波器截止频率为 50Hz，采样频率为 1000Hz
+        filter::LowPassFilter<1> velocity_filter_{50.0, 1000.0};
         OutputInterface<double> velocity_filtered_;
 };
 
