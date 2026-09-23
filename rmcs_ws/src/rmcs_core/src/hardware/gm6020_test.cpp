@@ -72,7 +72,7 @@ class GM6020Test : public rmcs_executor::Component, public rclcpp::Node, public 
         {
             auto builder = board_ -> start_transmit();
 
-            builder.can_transmit(Spec::kCans.kCan2, 
+            builder.can_transmit(Spec::kCans.kCan1, 
             {
                 .can_id = motor_.send_id(),                                // 标识符，表明电流控制（参考 GM6020 文档）
                 .can_data = device::CanPacket8
@@ -87,7 +87,7 @@ class GM6020Test : public rmcs_executor::Component, public rclcpp::Node, public 
 
         void can_receive_callback(const Spec::Can & can, const View::Can & data) override
         {
-            if (can != Spec::kCans.kCan2) return;                                               // 丢弃不来自 CAN2 的帧
+            if (can != Spec::kCans.kCan1) return;                                               // 丢弃不来自 CAN1 的帧
             motor_.match_then_store_status(data.can_id, data.can_data);        // 留下电机 ID 匹配的数据
         }
 
