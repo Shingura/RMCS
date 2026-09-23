@@ -30,7 +30,11 @@ class GM6020Test : public rmcs_executor::Component, public rclcpp::Node, public 
             , motor_{*this, *command_component_, "/motor"} // 生成 GM6020 电机对象
             , dr16_{} // 生成 DR16 对象（这里是已经封装好的 DR16 的数据解算器，注意与下面的 remote_control 区分）
             {
-                motor_.configure(device::DjiMotor::Config{device::DjiMotor::Type::kGM6020, 1}.enable_multi_turn_angle());   // 启动多圆累积
+                motor_.configure(
+                    device::DjiMotor::Config{
+                        device::DjiMotor::Type::kGM6020, 
+                        static_cast<std::uint8_t>(get_parameter("motor_id").as_int())}  // 从 yaml 中读取电机 ID
+                        .enable_multi_turn_angle());   // 启动多圆累积
 
                 // 注册 DR16 遥控器（这里的 remote_control 更像是一个 hub，负责仲裁多路遥控器并代发数据到 channel 中，本例中只有 DR16 这一个遥控器）
                 remote_control_ = std::make_unique<device::RemoteControl>(*this);
@@ -70,7 +74,7 @@ class GM6020Test : public rmcs_executor::Component, public rclcpp::Node, public 
 
             builder.can_transmit(Spec::kCans.kCan2, 
             {
-                .can_id = 0x1FE,                                // 标识符，表明电流控制（参考 GM6020 文档）
+                .can_id = motor_.send_id(),                                // 标识符，表明电流控制（参考 GM6020 文档）
                 .can_data = device::CanPacket8
                     {
                     motor_.generate_command(),              // 读取目标力矩，换算成电流发送给 1 号电机

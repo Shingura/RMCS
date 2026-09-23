@@ -9,6 +9,7 @@ rmcs_executor:
 gm6020_hardware:
   ros__parameters:
     board_serial: ""
+    motor_id: 1
 
 gm6020_joystick:
   ros__parameters:
