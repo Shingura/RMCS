@@ -3,4 +3,4 @@
 	url = https://github.com/qzhhhi/FastTF.git
 [submodule "rmcs_ws/src/rmcs_auto_aim_v2"]
 	path = rmcs_ws/src/rmcs_auto_aim_v2
-	url = https://github.com/Alliance-Algorithm/rmcs_auto_aim_v2.git
+	url = https://github.com/Shingura/rmcs_auto_aim_v2.git
