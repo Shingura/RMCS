@@ -12,9 +12,9 @@ rmcs_executor:
 gantry_hardware:
   ros__parameters:
     board_serial: ""
-    pitch_left_motor_id: 1
+    pitch_left_motor_id: 3
     pitch_right_motor_id: 2
-    yaw_motor_id: 3
+    yaw_motor_id: 1
 
 gantry_joystick:
   ros__parameters:

@@ -48,7 +48,7 @@ class Gantry : public rmcs_executor::Component, public rclcpp::Node, public libr
             , yaw_motor_{*this, *command_component_, "/yaw"}                 // 生成 yaw 电机对象
             , dr16_{} // 生成 DR16 对象
             {
-                // 从 yaml 中读取三个电机的 ID（pitch 左为 1, pitch 右为 2, yaw 为 3），并启用多圈角度累积
+                // 从 yaml 中读取三个电机的 ID（pitch 左为 3, pitch 右为 2, yaw 为 1），并启用多圈角度累积
                 // 多圈累积用于记录跨越多个电机圈的行程，上电时从当前位置开始累加
                 pitch_left_motor_.configure(
                     device::DjiMotor::Config{
