@@ -21,7 +21,10 @@
                 "ms-python.debugpy",
                 "KylinIdeTeam.cmake-intellisence",
                 "streetsidesoftware.code-spell-checker",
-                "mhutchie.git-graph"
+                "mhutchie.git-graph",
+                "Tencent-Cloud.coding-copilot",
+                "oderwat.indent-rainbow",
+                "yzhang.markdown-all-in-one"
             ]
         }
     }
