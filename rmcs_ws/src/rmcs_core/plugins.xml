@@ -45,6 +45,7 @@
   <class type="rmcs_core::controller::pid::ErrorPidController" base_class_type="rmcs_executor::Component" />
   <class type="rmcs_core::controller::pid::FrictionWheelPidRecorder" base_class_type="rmcs_executor::Component" />
   <class type="rmcs_core::controller::GM6020TestController" base_class_type="rmcs_executor::Component" />
+  <class type="rmcs_core::controller::GantryJoystick" base_class_type="rmcs_executor::Component" />
 
   <class type="rmcs_core::controller::adrc::AdrcController" base_class_type="rmcs_executor::Component" />
 

@@ -3,6 +3,10 @@ rmcs_executor:
     update_rate: 1000.0
     components:
       - rmcs_core::hardware::Gantry -> gantry_hardware
+      - rmcs_core::controller::GantryJoystick -> gantry_joystick
+      - rmcs_core::controller::pid::PidController -> pitch_left_velocity_pid
+      - rmcs_core::controller::pid::PidController -> pitch_right_velocity_pid
+      - rmcs_core::controller::pid::PidController -> yaw_velocity_pid
       - rmcs_core::broadcaster::ValueBroadcaster -> value_broadcaster
 
 gantry_hardware:
@@ -12,12 +16,57 @@ gantry_hardware:
     pitch_right_motor_id: 2
     yaw_motor_id: 3
 
+gantry_joystick:
+  ros__parameters:
+    dead_zone: 0.05
+    pitch_max_velocity: 5.0
+    yaw_max_velocity: 5.0
+    sync_gain: 2.0
+    max_sync_error: 0.5
+    zero_point_delay_cycles: 1000
+
+# 速度环：把转速误差换算成力矩
+pitch_left_velocity_pid:
+  ros__parameters:
+    measurement: /pitch/left/velocity_filtered
+    setpoint: /pitch/left/control_velocity
+    control: /pitch/left/control_torque
+    kp: 0.02
+    ki: 0.002
+    kd: 0.0
+    output_max: 1.5
+    output_min: -1.5
+
+pitch_right_velocity_pid:
+  ros__parameters:
+    measurement: /pitch/right/velocity_filtered
+    setpoint: /pitch/right/control_velocity
+    control: /pitch/right/control_torque
+    kp: 0.02
+    ki: 0.002
+    kd: 0.0
+    output_max: 1.5
+    output_min: -1.5
+
+yaw_velocity_pid:
+  ros__parameters:
+    measurement: /yaw/velocity_filtered
+    setpoint: /yaw/control_velocity
+    control: /yaw/control_torque
+    kp: 0.02
+    ki: 0.002
+    kd: 0.0
+    output_max: 1.5
+    output_min: -1.5
+
 value_broadcaster:
   ros__parameters:
     forward_list:
       - /pitch/left/angle
-      - /pitch/left/velocity_filtered
       - /pitch/right/angle
+      - /pitch/left/control_velocity
+      - /pitch/right/control_velocity
+      - /pitch/left/velocity_filtered
       - /pitch/right/velocity_filtered
       - /yaw/angle
       - /yaw/velocity_filtered
