@@ -1,8 +1,8 @@
 // 龙门架发射架控制器：把 DR16 摇杆指令换算成三个电机的目标转速
 //
 // 输入：
-//   - /remote/joystick/left  左摇杆，取 y 分量控制 pitch
-//   - /remote/joystick/right 右摇杆，取 x 分量控制 yaw
+//   - /remote/joystick/left  左摇杆，取 x 分量控制 pitch
+//   - /remote/joystick/right 右摇杆，取 y 分量控制 yaw
 //   - /remote/switch/left    遥控器左开关状态
 //   - /remote/switch/right   遥控器右开关状态
 //   - /pitch/left/angle      左侧 pitch 电机角度
@@ -85,8 +85,8 @@ class GantryJoystick : public rmcs_executor::Component, public rclcpp::Node
             }
 
             // 摇杆指令：去死区后按最大转速换算成目标转速
-            const double pitch_command = apply_dead_zone(joystick_left_->y()) * pitch_max_velocity_;
-            const double yaw_command = apply_dead_zone(joystick_right_->x()) * yaw_max_velocity_;
+            const double pitch_command = apply_dead_zone(joystick_left_->x()) * pitch_max_velocity_;
+            const double yaw_command = apply_dead_zone(joystick_right_->y()) * yaw_max_velocity_;
 
             *yaw_control_velocity_ = yaw_command;
 
