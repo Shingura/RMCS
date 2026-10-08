@@ -1,0 +1,23 @@
+rmcs_executor:
+  ros__parameters:
+    update_rate: 1000.0
+    components:
+      - rmcs_core::hardware::Gantry -> gantry_hardware
+      - rmcs_core::broadcaster::ValueBroadcaster -> value_broadcaster
+
+gantry_hardware:
+  ros__parameters:
+    board_serial: ""
+    pitch_left_motor_id: 1
+    pitch_right_motor_id: 2
+    yaw_motor_id: 3
+
+value_broadcaster:
+  ros__parameters:
+    forward_list:
+      - /pitch/left/angle
+      - /pitch/left/velocity_filtered
+      - /pitch/right/angle
+      - /pitch/right/velocity_filtered
+      - /yaw/angle
+      - /yaw/velocity_filtered

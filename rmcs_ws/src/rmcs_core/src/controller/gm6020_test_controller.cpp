@@ -42,7 +42,7 @@ class GM6020TestController : public rmcs_executor::Component, public rclcpp::Nod
                 target_angle_ += joystick_right_ -> y() * max_angular_velocity_ / 1000.0;
                 RCLCPP_INFO_THROTTLE(
                     get_logger(), *get_clock(), 500,
-            "y=%f  max_ang=%f   target=%f",
+                "y=%f  max_ang=%f   target=%f",
                     joystick_right_->y(), max_angular_velocity_, target_angle_);
                 *control_target_ = target_angle_;
             }
