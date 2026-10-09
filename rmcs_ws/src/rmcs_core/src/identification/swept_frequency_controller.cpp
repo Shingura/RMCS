@@ -137,6 +137,7 @@ public:
         , sweep_enabled_(parameter_or_declare(*this, "sweep", false))
         , pid_enabled_(parameter_or_declare(*this, "pid", false))
         , logarithmic_(parameter_or_declare(*this, "logarithmic", false))
+        , setpoint_from_current_(parameter_or_declare(*this, "setpoint_from_current", false))
         , dc_offset_(parameter_or_declare(*this, "dc_offset", 0.0))
         , control_torque_name_(interface_name(target_, "control_torque"))
         , measured_torque_name_(interface_name(target_, "torque"))
@@ -208,8 +209,15 @@ public:
             reset_pid_state();
             finish_sweep();
             *control_torque_ = nan_;
+            setpoint_initialized_ = false; // 停止期间清零，下次使能时重新取当前角度
             store_switch_state(current_switch_left, current_switch_right);
             return;
+        }
+
+        // 首次使能时把当前角度记为设定值，实现「手掰到哪里就停在哪里」
+        if (setpoint_from_current_ && !setpoint_initialized_ && measured_angle_.ready()) {
+            setpoint_ = *measured_angle_;
+            setpoint_initialized_ = true;
         }
 
         if (should_start_sweep(current_switch_left, current_switch_right))
@@ -340,6 +348,7 @@ private:
     const bool sweep_enabled_;
     const bool pid_enabled_;
     const bool logarithmic_;
+    const bool setpoint_from_current_;
     const double dc_offset_;
 
     const std::string control_torque_name_;
@@ -365,6 +374,7 @@ private:
     pid::PidCalculator position_pid_;
     pid::PidCalculator velocity_pid_;
     double setpoint_ = 0.0;
+    bool setpoint_initialized_ = false;
 
     bool sweep_active_ = false;
     Clock::time_point sweep_start_time_{};

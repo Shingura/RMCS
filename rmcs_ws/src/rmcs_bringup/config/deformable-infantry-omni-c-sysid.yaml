@@ -2,41 +2,52 @@ rmcs_executor:
   ros__parameters:
     update_rate: 1000.0
     components:
+      # 辨识只针对云台 yaw 轴，只保留硬件与扫频组件。其余组件全部停用：
+      # 底盘不起立、射击不转、裁判系统与自瞄不参与
       - rmcs_core::hardware::DeformableInfantryOmniC -> deformable_infantry
-
-      - rmcs_core::referee::Status -> referee_status
-      - rmcs_core::referee::Command -> referee_command
-
-      - rmcs_core::referee::command::Interaction -> referee_interaction
-      - rmcs_core::referee::command::interaction::Ui -> referee_ui
-      - rmcs_core::referee::app::ui::DeformableInfantry -> referee_ui_infantry
-
-      # 辨识时停用云台控制器：它与扫频组件争用 /gimbal/yaw/control_torque 输出
-      # - rmcs_core::controller::gimbal::DeformableInfantryGimbalController -> gimbal_controller
       - rmcs_core::controller::identification::SweptFrequencyController -> yaw_swept_frequency_controller
+
+      # 裁判系统：硬件命令组件中的超级电容需要 /referee/chassis/output_status，
+      # 由 referee_status 提供，必须保留。其余裁判组件停用
+      - rmcs_core::referee::Status -> referee_status
+      # - rmcs_core::referee::Command -> referee_command
+      # - rmcs_core::referee::command::Interaction -> referee_interaction
+      # - rmcs_core::referee::command::interaction::Ui -> referee_ui
+      # - rmcs_core::referee::app::ui::DeformableInfantry -> referee_ui_infantry
+
+      # 云台控制器与扫频组件争用 /gimbal/yaw/control_torque 输出，辨识时必须停用
+      # - rmcs_core::controller::gimbal::DeformableInfantryGimbalController -> gimbal_controller
+
+      # 云台 pitch 保持：抬平发射枪管，避免枪管垂在底盘上阻碍 yaw 旋转
       - rmcs_core::controller::identification::SweptFrequencyController -> pitch_hold_controller
 
-      - rmcs_core::controller::shooting::FrictionWheelController -> friction_wheel_controller
-      - rmcs_core::controller::shooting::HeatController -> heat_controller
-      - rmcs_core::controller::shooting::BulletFeederController17mm -> bullet_feeder_controller
-      - rmcs_core::controller::pid::PidController -> left_friction_velocity_pid_controller
-      - rmcs_core::controller::pid::PidController -> right_friction_velocity_pid_controller
-      - rmcs_core::controller::pid::PidController -> bullet_feeder_velocity_pid_controller
+      # 射击系统
+      # - rmcs_core::controller::shooting::FrictionWheelController -> friction_wheel_controller
+      # - rmcs_core::controller::shooting::HeatController -> heat_controller
+      # - rmcs_core::controller::shooting::BulletFeederController17mm -> bullet_feeder_controller
+      # - rmcs_core::controller::pid::PidController -> left_friction_velocity_pid_controller
+      # - rmcs_core::controller::pid::PidController -> right_friction_velocity_pid_controller
+      # - rmcs_core::controller::pid::PidController -> bullet_feeder_velocity_pid_controller
 
+      # 底盘：这两个组件只提供硬件命令组件所需的信号，不下发任何电机力矩，
+      # 因此不会让车起立或移动。
+      #   DeformableChassis 提供 /chassis/control_mode，ChassisPowerController 需要它
+      #   ChassisPowerController 提供 /chassis/supercap/charge_power_limit
+      # 悬挂、轮子与关节控制器全部停用，底盘电机收不到力矩指令
       - rmcs_core::controller::chassis::DeformableChassis -> chassis_controller
-      - rmcs_core::controller::chassis::DeformableSuspension -> deformable_suspension
       - rmcs_core::controller::chassis::ChassisPowerController -> chassis_power_controller
-      - rmcs_core::controller::chassis::DeformableOmniWheelController -> deformable_chassis_controller
+      # - rmcs_core::controller::chassis::DeformableSuspension -> deformable_suspension
+      # - rmcs_core::controller::chassis::DeformableOmniWheelController -> deformable_chassis_controller
+      # - rmcs_core::controller::chassis::DeformableJointController -> lf_joint_controller
+      # - rmcs_core::controller::chassis::DeformableJointController -> lb_joint_controller
+      # - rmcs_core::controller::chassis::DeformableJointController -> rb_joint_controller
+      # - rmcs_core::controller::chassis::DeformableJointController -> rf_joint_controller
 
-      - rmcs_core::controller::chassis::DeformableJointController -> lf_joint_controller
-      - rmcs_core::controller::chassis::DeformableJointController -> lb_joint_controller
-      - rmcs_core::controller::chassis::DeformableJointController -> rb_joint_controller
-      - rmcs_core::controller::chassis::DeformableJointController -> rf_joint_controller
-
-      - rmcs::AutoAimRecorderComponent -> auto_aim_recorder
-      - rmcs::AutoAimComponent -> auto_aim_component
-      - rmcs::AutoAimCapturerComponent -> auto_aim_capturer
-      - rmcs_core::referee::app::ui::AutoAimUi -> auto_aim_ui
+      # 自瞄
+      # - rmcs::AutoAimRecorderComponent -> auto_aim_recorder
+      # - rmcs::AutoAimComponent -> auto_aim_component
+      # - rmcs::AutoAimCapturerComponent -> auto_aim_capturer
+      # - rmcs_core::referee::app::ui::AutoAimUi -> auto_aim_ui
 
       # - rmcs_core::broadcaster::ValueBroadcaster -> value_broadcaster
       # - rmcs_core::debug::ValueCollector -> value_collector
@@ -380,14 +391,15 @@ yaw_swept_frequency_controller:
     start_freq: 0.1
     end_freq: 10.0
     duration: 60.0
-    amplitude: 0.3
+    amplitude: 2.0
 
     pid: true
-    setpoint: 0.0
-    position_kp: 10.0
+    setpoint_from_current: true  # 首次使能时取当前角度为设定值，扫频以此位置为基准
+    setpoint: 0.3
+    position_kp: 5.0
     position_ki: 0.0
     position_kd: 0.0
-    velocity_kp: 3.0
+    velocity_kp: 1.0
     velocity_ki: 0.0
     velocity_kd: 0.0
     dc_offset: 0.0
@@ -400,11 +412,12 @@ pitch_hold_controller:
     logarithmic: false
 
     pid: true
-    setpoint: 0.0
-    position_kp: 35.0
-    position_ki: 0.5
+    setpoint_from_current: true  # 首次使能时取当前角度为设定值，手掰到哪里就停在哪里
+    setpoint: 0.3
+    position_kp: 5.0
+    position_ki: 0.0
     position_kd: 0.0
     velocity_kp: 2.0
     velocity_ki: 0.0
     velocity_kd: 0.0
-    dc_offset: 0.0
+    dc_offset: 3.5  # 重力前馈：抵消枪管重力矩，使 pitch 不必靠误差撑住
