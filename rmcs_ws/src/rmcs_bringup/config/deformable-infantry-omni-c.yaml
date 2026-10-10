@@ -4,50 +4,55 @@ rmcs_executor:
     components:
       - rmcs_core::hardware::DeformableInfantryOmniC -> deformable_infantry
 
-      - rmcs_core::referee::Status -> referee_status
-      - rmcs_core::referee::Command -> referee_command
-
-      - rmcs_core::referee::command::Interaction -> referee_interaction
-      - rmcs_core::referee::command::interaction::Ui -> referee_ui
-      - rmcs_core::referee::app::ui::DeformableInfantry -> referee_ui_infantry
-
       - rmcs_core::controller::gimbal::DeformableInfantryGimbalController -> gimbal_controller
 
-      - rmcs_core::controller::shooting::FrictionWheelController -> friction_wheel_controller
-      - rmcs_core::controller::shooting::HeatController -> heat_controller
-      - rmcs_core::controller::shooting::BulletFeederController17mm -> bullet_feeder_controller
-      - rmcs_core::controller::pid::PidController -> left_friction_velocity_pid_controller
-      - rmcs_core::controller::pid::PidController -> right_friction_velocity_pid_controller
-      - rmcs_core::controller::pid::PidController -> bullet_feeder_velocity_pid_controller
+      # 裁判系统：硬件命令组件中的超级电容需要 /referee/chassis/output_status，
+      # 由 referee_status 提供，必须保留。其余裁判组件停用
+      - rmcs_core::referee::Status -> referee_status
+      # - rmcs_core::referee::Command -> referee_command
+      # - rmcs_core::referee::command::Interaction -> referee_interaction
+      # - rmcs_core::referee::command::interaction::Ui -> referee_ui
+      # - rmcs_core::referee::app::ui::DeformableInfantry -> referee_ui_infantry
 
+      # 射击系统
+      # - rmcs_core::controller::shooting::FrictionWheelController -> friction_wheel_controller
+      # - rmcs_core::controller::shooting::HeatController -> heat_controller
+      # - rmcs_core::controller::shooting::BulletFeederController17mm -> bullet_feeder_controller
+      # - rmcs_core::controller::pid::PidController -> left_friction_velocity_pid_controller
+      # - rmcs_core::controller::pid::PidController -> right_friction_velocity_pid_controller
+      # - rmcs_core::controller::pid::PidController -> bullet_feeder_velocity_pid_controller
+
+      # 底盘：这两个组件只提供硬件命令组件所需的信号，不下发任何电机力矩，
+      # 因此底盘不起立也不移动。悬挂、轮子与关节控制器全部停用
       - rmcs_core::controller::chassis::DeformableChassis -> chassis_controller
-      - rmcs_core::controller::chassis::DeformableSuspension -> deformable_suspension
       - rmcs_core::controller::chassis::ChassisPowerController -> chassis_power_controller
-      - rmcs_core::controller::chassis::DeformableOmniWheelController -> deformable_chassis_controller
+      # - rmcs_core::controller::chassis::DeformableSuspension -> deformable_suspension
+      # - rmcs_core::controller::chassis::DeformableOmniWheelController -> deformable_chassis_controller
+      # - rmcs_core::controller::chassis::DeformableJointController -> lf_joint_controller
+      # - rmcs_core::controller::chassis::DeformableJointController -> lb_joint_controller
+      # - rmcs_core::controller::chassis::DeformableJointController -> rb_joint_controller
+      # - rmcs_core::controller::chassis::DeformableJointController -> rf_joint_controller
 
-      - rmcs_core::controller::chassis::DeformableJointController -> lf_joint_controller
-      - rmcs_core::controller::chassis::DeformableJointController -> lb_joint_controller
-      - rmcs_core::controller::chassis::DeformableJointController -> rb_joint_controller
-      - rmcs_core::controller::chassis::DeformableJointController -> rf_joint_controller
-
-      - rmcs::AutoAimRecorderComponent -> auto_aim_recorder
-      - rmcs::AutoAimComponent -> auto_aim_component
-      - rmcs::AutoAimCapturerComponent -> auto_aim_capturer
-      - rmcs_core::referee::app::ui::AutoAimUi -> auto_aim_ui
+      # 自瞄
+      # - rmcs::AutoAimRecorderComponent -> auto_aim_recorder
+      # - rmcs::AutoAimComponent -> auto_aim_component
+      # - rmcs::AutoAimCapturerComponent -> auto_aim_capturer
+      # - rmcs_core::referee::app::ui::AutoAimUi -> auto_aim_ui
 
       # - rmcs_core::broadcaster::ValueBroadcaster -> value_broadcaster
-      # - rmcs_core::debug::ValueCollector -> value_collector
+      - rmcs_core::debug::ValueCollector -> value_collector
 
 value_collector:
   ros__parameters:
-    csv_path: "/tmp/pitch_<timestamp>.csv"
+    csv_path: "/tmp/yaw_<timestamp>.csv"
     signals:
-      - /gimbal/pitch/angle
-      - /gimbal/pitch/velocity
-      - /gimbal/pitch/velocity_imu
-      - /gimbal/pitch/angle_error
-      - /gimbal/pitch/control_torque
-      - /gimbal/pitch/control_velocity
+      - /gimbal/yaw/angle
+      - /gimbal/yaw/velocity
+      - /gimbal/yaw/velocity_imu
+      - /gimbal/yaw/control_angle
+      - /gimbal/yaw/control_velocity
+      - /gimbal/yaw/control_torque
+      - /gimbal/yaw/torque
     write_interval: 5
     flush_interval: 1000
 
@@ -115,7 +120,7 @@ deformable_infantry:
     chassis_radius: 0.2341741
     rod_length: 0.140
     yaw_motor_zero_point: 38910
-    pitch_motor_zero_point: 32214
+    pitch_motor_zero_point: 7093
 
 chassis_controller:
   ros__parameters:
@@ -207,6 +212,15 @@ gimbal_controller:
 
     pitch_gravity_ff_gain: 2.575
     pitch_gravity_ff_phase: 1.784
+
+    # 阶跃测试：左开关中位且右开关拨到上时，按下列幅值依次对目标角度施加阶跃。
+    # 每档先正向保持 hold 秒，回原点停留 rest 秒，再反向重复一次，整轮重复 repeat 遍。
+    # 当前四档两遍共 48 秒
+    yaw_step_test_enable: true
+    yaw_step_angles: [0.1, 0.3, 0.6, 1.0]
+    yaw_step_hold: 2.0
+    yaw_step_rest: 1.0
+    yaw_step_repeat: 2
 
     pitch_torque_control: true
 

@@ -2,8 +2,10 @@
 #include "controller/pid/pid_calculator.hpp"
 
 #include <cmath>
+#include <cstddef>
 #include <limits>
 #include <string>
+#include <vector>
 
 #include <eigen3/Eigen/Dense>
 #include <rclcpp/node.hpp>
@@ -42,6 +44,15 @@ public:
         get_parameter_or("pitch_velocity_ff_gain", pitch_velocity_ff_gain_, 0.0);
         get_parameter_or("pitch_acceleration_ff_gain", pitch_acceleration_ff_gain_, 0.0);
         get_parameter_or("ctrl_hold_pitch_target_angle", ctrl_hold_pitch_target_angle_, 0.0);
+
+        get_parameter_or("yaw_step_test_enable", yaw_step_test_enabled_, false);
+        get_parameter_or("yaw_step_angles", yaw_step_angles_, std::vector<double>{});
+        get_parameter_or("yaw_step_hold", yaw_step_hold_duration_, 2.0);
+        get_parameter_or("yaw_step_rest", yaw_step_rest_duration_, 1.0);
+        get_parameter_or("yaw_step_repeat", yaw_step_repeat_, 1);
+
+        if (yaw_step_test_enabled_ && yaw_step_angles_.empty())
+            RCLCPP_WARN(get_logger(), "yaw_step_test_enable is on but yaw_step_angles is empty");
     }
 
     auto update() -> void override {
@@ -57,6 +68,7 @@ public:
         }
 
         update_pitch_lock_state(switch_left, switch_right, keyboard);
+        update_yaw_step_test(switch_left, switch_right);
 
         if (ctrl_hold_requested()) {
             update_ctrl_hold_control();
@@ -69,8 +81,17 @@ public:
                                   && input_.auto_aim_control_direction.ready()
                                   && input_.auto_aim_control_direction->allFinite()
                                   && !input_.auto_aim_control_direction->isZero();
-        const auto angle_error =
-            auto_aim_active ? update_auto_aim_control() : update_manual_control();
+        auto angle_error = auto_aim_active ? update_auto_aim_control() : update_manual_control();
+
+        // 阶跃测试期间，目标角度改由发生器给出，pitch 仍走原控制路径
+        if (yaw_step_active_ && input_.yaw_angle.ready() && std::isfinite(*input_.yaw_angle)) {
+            advance_yaw_step_test(update_dt());
+            if (yaw_step_active_) {
+                const auto target = yaw_step_target_angle();
+                angle_error.yaw_angle_error = normalize_angle(target - *input_.yaw_angle);
+                *output_.yaw_control_angle = target;
+            }
+        }
 
         *output_.yaw_angle_error = angle_error.yaw_angle_error;
         if (!ctrl_hold_active_)
@@ -82,9 +103,11 @@ public:
             yaw_angle_pid_.reset();
             yaw_velocity_pid_.reset();
             *output_.yaw_control_torque = kNaN;
+            *output_.yaw_control_velocity = kNaN;
         } else {
-            const auto yaw_velocity_ref = yaw_angle_pid_.update(angle_error.yaw_angle_error)
-                                        + trajectory_ff.yaw_ref_velocity;
+            const auto yaw_velocity_ref =
+                yaw_angle_pid_.update(angle_error.yaw_angle_error) + trajectory_ff.yaw_ref_velocity;
+            *output_.yaw_control_velocity = yaw_velocity_ref;
             *output_.yaw_control_torque =
                 yaw_velocity_pid_.update(yaw_velocity_ref - *input_.yaw_velocity_imu)
                 + trajectory_ff.yaw_velocity + trajectory_ff.yaw_acceleration;
@@ -140,6 +163,7 @@ private:
             component.register_input("/remote/mouse", mouse);
             component.register_input("/predefined/update_rate", update_rate, false);
 
+            component.register_input("/gimbal/yaw/angle", yaw_angle, false);
             component.register_input("/gimbal/pitch/angle", pitch_angle);
             component.register_input("/gimbal/yaw/velocity_imu", yaw_velocity_imu);
             component.register_input("/gimbal/pitch/velocity_imu", pitch_velocity_imu);
@@ -159,6 +183,7 @@ private:
         InputInterface<rmcs_msgs::Mouse> mouse;
         InputInterface<double> update_rate;
 
+        InputInterface<double> yaw_angle;
         InputInterface<double> pitch_angle;
         InputInterface<double> yaw_velocity_imu;
         InputInterface<double> pitch_velocity_imu;
@@ -173,6 +198,7 @@ private:
         explicit Output(rmcs_executor::Component& component) {
             component.register_output("/gimbal/yaw/control_torque", yaw_control_torque, kNaN);
             component.register_output("/gimbal/yaw/control_angle", yaw_control_angle, kNaN);
+            component.register_output("/gimbal/yaw/control_velocity", yaw_control_velocity, kNaN);
             component.register_output(
                 "/gimbal/pitch/control_velocity", pitch_control_velocity, kNaN);
             component.register_output("/gimbal/pitch/control_torque", pitch_control_torque, kNaN);
@@ -183,6 +209,7 @@ private:
 
         OutputInterface<double> yaw_control_torque;
         OutputInterface<double> yaw_control_angle;
+        OutputInterface<double> yaw_control_velocity;
         OutputInterface<double> pitch_control_velocity;
         OutputInterface<double> pitch_control_torque;
         OutputInterface<double> pitch_control_angle;
@@ -223,6 +250,87 @@ private:
         const auto pitch_shift = -joystick_sensitivity_ * input_.joystick_left->x()
                                + mouse_sensitivity_ * input_.mouse_velocity->x();
         return gimbal_solver_.update(TwoAxisGimbalSolver::SetControlShift{yaw_shift, pitch_shift});
+    }
+
+    struct StepSegment {
+        double offset;
+        double duration;
+    };
+
+    static auto normalize_angle(double angle) -> double {
+        constexpr auto two_pi = 2 * std::numbers::pi;
+        angle = std::fmod(angle, two_pi);
+        if (angle > std::numbers::pi)
+            angle -= two_pi;
+        else if (angle < -std::numbers::pi)
+            angle += two_pi;
+        return angle;
+    }
+
+    // 左开关中位且右开关在上时触发，与悬挂切换（左下右上）的组合不冲突
+    auto update_yaw_step_test(rmcs_msgs::Switch switch_left, rmcs_msgs::Switch switch_right)
+        -> void {
+        const auto triggered =
+            switch_left == rmcs_msgs::Switch::MIDDLE && switch_right == rmcs_msgs::Switch::UP;
+
+        if (yaw_step_test_enabled_ && triggered
+            && yaw_step_last_switch_right_ != rmcs_msgs::Switch::UP)
+            start_yaw_step_test();
+
+        if (!triggered)
+            stop_yaw_step_test();
+
+        yaw_step_last_switch_right_ = switch_right;
+    }
+
+    auto start_yaw_step_test() -> void {
+        if (!input_.yaw_angle.ready() || !std::isfinite(*input_.yaw_angle))
+            return;
+
+        yaw_step_origin_angle_ = *input_.yaw_angle;
+        yaw_step_segments_.clear();
+        for (int repeat = 0; repeat < yaw_step_repeat_; ++repeat) {
+            for (const auto amplitude : yaw_step_angles_) {
+                yaw_step_segments_.push_back({amplitude, yaw_step_hold_duration_});
+                yaw_step_segments_.push_back({0.0, yaw_step_rest_duration_});
+                yaw_step_segments_.push_back({-amplitude, yaw_step_hold_duration_});
+                yaw_step_segments_.push_back({0.0, yaw_step_rest_duration_});
+            }
+        }
+
+        yaw_step_active_ = !yaw_step_segments_.empty();
+        yaw_step_index_ = 0;
+        yaw_step_phase_elapsed_ = 0.0;
+    }
+
+    auto stop_yaw_step_test() -> void {
+        if (!yaw_step_active_)
+            return;
+
+        yaw_step_active_ = false;
+        yaw_step_index_ = 0;
+        yaw_step_phase_elapsed_ = 0.0;
+        yaw_step_segments_.clear();
+        yaw_angle_pid_.reset();
+        yaw_velocity_pid_.reset();
+        *output_.yaw_control_angle = kNaN;
+    }
+
+    auto advance_yaw_step_test(double dt) -> void {
+        while (yaw_step_active_) {
+            yaw_step_phase_elapsed_ += dt;
+            if (yaw_step_phase_elapsed_ < yaw_step_segments_.at(yaw_step_index_).duration)
+                return;
+
+            yaw_step_phase_elapsed_ -= yaw_step_segments_.at(yaw_step_index_).duration;
+            ++yaw_step_index_;
+            if (yaw_step_index_ >= yaw_step_segments_.size())
+                stop_yaw_step_test();
+        }
+    }
+
+    auto yaw_step_target_angle() const -> double {
+        return yaw_step_origin_angle_ + yaw_step_segments_.at(yaw_step_index_).offset;
     }
 
     auto pitch_gravity_feedforward() const -> double {
@@ -326,6 +434,7 @@ private:
         pitch_velocity_pid_.reset();
         *output_.yaw_control_torque = kNaN;
         *output_.yaw_control_angle = kNaN;
+        *output_.yaw_control_velocity = kNaN;
         *output_.pitch_control_velocity = kNaN;
         *output_.pitch_control_torque = kNaN;
         *output_.pitch_control_angle = kNaN;
@@ -339,6 +448,7 @@ private:
         gimbal_solver_.update(TwoAxisGimbalSolver::SetDisabled{});
         *output_.yaw_angle_error = kNaN;
         *output_.pitch_angle_error = kNaN;
+        stop_yaw_step_test();
         reset_control_outputs();
     }
 
@@ -382,6 +492,19 @@ private:
     bool suspension_on_by_switch_ = false;
     rmcs_msgs::Switch last_switch_right_ = rmcs_msgs::Switch::UNKNOWN;
     bool ctrl_hold_active_ = false;
+
+    bool yaw_step_test_enabled_ = false;
+    std::vector<double> yaw_step_angles_;
+    double yaw_step_hold_duration_ = 2.0;
+    double yaw_step_rest_duration_ = 1.0;
+    int yaw_step_repeat_ = 1;
+
+    bool yaw_step_active_ = false;
+    rmcs_msgs::Switch yaw_step_last_switch_right_ = rmcs_msgs::Switch::UNKNOWN;
+    double yaw_step_origin_angle_ = 0.0;
+    std::vector<StepSegment> yaw_step_segments_;
+    size_t yaw_step_index_ = 0;
+    double yaw_step_phase_elapsed_ = 0.0;
 };
 
 } // namespace rmcs_core::controller::gimbal
