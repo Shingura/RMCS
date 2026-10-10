@@ -391,7 +391,7 @@ yaw_swept_frequency_controller:
     start_freq: 0.1
     end_freq: 10.0
     duration: 60.0
-    amplitude: 2.0
+    amplitude: 1.5
 
     pid: true
     setpoint_from_current: true  # 首次使能时取当前角度为设定值，扫频以此位置为基准
