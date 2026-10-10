@@ -313,7 +313,7 @@ service rmcs restart
 
 遥控器 yaw 摇杆推满相当于目标角速度阶跃，对比的是实际角速度跟随目标角速度的紧密程度。
 
-手动操作的可重复性：摇杆推满后摇杆量恒为最大值，稳态输入每次都相同；只有推动过程（上升沿）可能改变。因此分析时从目标稳定之后开始计算指标，前后两组就完全可比，不需要额外的信号发生器。`value_collector` 要同时记录输入（`/remote/joystick/right`）与响应（`/gimbal/yaw/velocity`、`/gimbal/yaw/angle`）。
+手动操作的可重复性：摇杆推满后摇杆量恒为最大值，稳态输入每次都相同；只有推动过程（上升沿）可能改变。因此分析时从目标稳定之后开始计算指标，前后两组就完全可比，不需要额外的信号发生器。`value_collector` 要同时记录输入（`/remote/joystick/left`）与响应（`/gimbal/yaw/velocity`、`/gimbal/yaw/angle`）。
 
 | 指标 | 定义 | 从数据里怎么取 |
 | --- | --- | --- |
