@@ -26,8 +26,8 @@ DEFAULT_DT = 0.005
 COLUMN_ANGLE = "/gimbal/yaw/angle"
 COLUMN_VELOCITY_MOTOR = "/gimbal/yaw/velocity"
 COLUMN_VELOCITY_IMU = "/gimbal/yaw/velocity_imu"
-COLUMN_CONTROL_ANGLE = "/gimbal/yaw/control_angle"
-COLUMN_CONTROL_VELOCITY = "/gimbal/yaw/control_velocity"
+COLUMN_CONTROL_ANGLE = "/gimbal/yaw/target_angle"
+COLUMN_CONTROL_VELOCITY = "/gimbal/yaw/target_velocity"
 COLUMN_CONTROL_TORQUE = "/gimbal/yaw/control_torque"
 COLUMN_TORQUE = "/gimbal/yaw/torque"
 
@@ -74,6 +74,22 @@ def load_columns(path):
     return columns
 
 
+def wrap_to_pi(value):
+    """Normalize an angle difference to (-pi, pi].
+
+    The gimbal yaw angle is reported in [0, 2*pi). A step that crosses the
+    zero crossing makes the reading jump by 2*pi, which corrupts every metric
+    computed from a raw difference.
+    """
+    two_pi = 2.0 * math.pi
+    value = math.fmod(value, two_pi)
+    if value > math.pi:
+        value -= two_pi
+    elif value <= -math.pi:
+        value += two_pi
+    return value
+
+
 def find_segments(control_angle, first, last):
     """Return the half-open index ranges between successive target changes."""
     starts = [first]
@@ -99,7 +115,7 @@ def analyze_segment(columns, start, end, dt):
 
     target = control_angle[start]
     start_angle = angle[max(start - 1, 0)]
-    travel = target - start_angle
+    travel = wrap_to_pi(target - start_angle)
     if abs(travel) < STEP_THRESHOLD_RAD:
         return None
 
@@ -112,21 +128,23 @@ def analyze_segment(columns, start, end, dt):
 
     direction = 1.0 if travel > 0 else -1.0
 
+    # Work with differences from the segment start so that a wrap at the zero
+    # crossing cannot masquerade as a large travel.
+    progress = [wrap_to_pi(value - start_angle) for value in angles]
+    deviation = [wrap_to_pi(value - target) for value in angles]
+
     rise_time = None
-    for offset, value in enumerate(angles):
-        if (value - start_angle) * direction >= RISE_FRACTION * abs(travel):
+    for offset, value in enumerate(progress):
+        if value * direction >= RISE_FRACTION * abs(travel):
             rise_time = offset * dt
             break
 
-    if direction > 0:
-        overshoot = (max(angles) - target) / abs(travel) * 100.0
-    else:
-        overshoot = (target - min(angles)) / abs(travel) * 100.0
+    overshoot = max(value * direction for value in deviation) / abs(travel) * 100.0
 
-    tail = min(int(STEADY_WINDOW_S / dt), len(angles))
-    steady_error = statistics.fmean(angles[-tail:]) - target
+    tail = min(int(STEADY_WINDOW_S / dt), len(deviation))
+    steady_error = statistics.fmean(deviation[-tail:])
 
-    angle_error_integral = sum(abs(target - value) for value in angles) * dt
+    angle_error_integral = sum(abs(value) for value in deviation) * dt
     velocity_error_integral = (
         sum(abs(command - actual) for command, actual in zip(commands, velocities)) * dt
     )
