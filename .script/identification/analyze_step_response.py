@@ -141,7 +141,8 @@ def analyze_segment(columns, start, end, dt):
 
     overshoot = max(value * direction for value in deviation) / abs(travel) * 100.0
 
-    tail = min(int(STEADY_WINDOW_S / dt), len(deviation))
+    # 回零段只有 1 s，窗口取满整段会把回零的过渡过程算进稳态。上限取段长的一半
+    tail = min(int(STEADY_WINDOW_S / dt), len(deviation) // 2)
     steady_error = statistics.fmean(deviation[-tail:])
 
     angle_error_integral = sum(abs(value) for value in deviation) * dt

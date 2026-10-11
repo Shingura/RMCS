@@ -1,3 +1,6 @@
+#include "controller/adrc/eso.hpp"
+#include "controller/adrc/nlesf.hpp"
+#include "controller/adrc/td.hpp"
 #include "controller/gimbal/two_axis_gimbal_solver.hpp"
 #include "controller/pid/pid_calculator.hpp"
 
@@ -50,6 +53,13 @@ public:
         get_parameter_or("yaw_step_hold", yaw_step_hold_duration_, 2.0);
         get_parameter_or("yaw_step_rest", yaw_step_rest_duration_, 1.0);
         get_parameter_or("yaw_step_repeat", yaw_step_repeat_, 1);
+
+        get_parameter_or("yaw_adrc_enable", yaw_adrc_enabled_, false);
+        get_parameter_or("yaw_adrc_kt", yaw_adrc_kt_, 1.0);
+        get_parameter_or(
+            "yaw_adrc_output_min", yaw_adrc_output_min_, -std::numeric_limits<double>::infinity());
+        get_parameter_or(
+            "yaw_adrc_output_max", yaw_adrc_output_max_, std::numeric_limits<double>::infinity());
 
         if (yaw_step_test_enabled_ && yaw_step_angles_.empty())
             RCLCPP_WARN(get_logger(), "yaw_step_test_enable is on but yaw_step_angles is empty");
@@ -104,6 +114,15 @@ public:
             yaw_velocity_pid_.reset();
             *output_.yaw_control_torque = kNaN;
             *output_.yaw_target_velocity = kNaN;
+            yaw_adrc_last_u_ = 0.0;
+            yaw_angle_unwrapped_ready_ = false;
+        } else if (
+            yaw_adrc_enabled_ && input_.yaw_angle.ready() && std::isfinite(*input_.yaw_angle)) {
+            // 切到 ADRC 时清掉双环 PID 的积分项，避免切换瞬间残留的积分值参与输出
+            yaw_angle_pid_.reset();
+            yaw_velocity_pid_.reset();
+            const auto measurement = unwrapped_yaw_angle();
+            update_yaw_adrc(measurement + angle_error.yaw_angle_error, measurement);
         } else {
             const auto yaw_velocity_ref =
                 yaw_angle_pid_.update(angle_error.yaw_angle_error) + trajectory_ff.yaw_ref_velocity;
@@ -316,6 +335,78 @@ private:
         *output_.yaw_target_angle = kNaN;
     }
 
+    // ADRC 对绝对角度做运算，角度在 0 与 2*pi 处回绕会让跟踪微分器看到 2*pi 的
+    // 跳变。这里维护一个连续角度，供观测器与跟踪微分器使用
+    auto unwrapped_yaw_angle() -> double {
+        const auto raw = *input_.yaw_angle;
+        if (!yaw_angle_unwrapped_ready_) {
+            yaw_angle_unwrapped_ready_ = true;
+            yaw_angle_unwrapped_ = raw;
+            reset_yaw_adrc(raw);
+        } else {
+            yaw_angle_unwrapped_ += normalize_angle(raw - yaw_angle_last_raw_);
+        }
+        yaw_angle_last_raw_ = raw;
+        return yaw_angle_unwrapped_;
+    }
+
+    auto reset_yaw_adrc(double angle) -> void {
+        yaw_td_.reset(angle, 0.0);
+        yaw_eso_.reset(angle);
+        yaw_adrc_last_u_ = 0.0;
+    }
+
+    auto update_yaw_adrc(double reference, double measurement) -> void {
+        const auto td_out = yaw_td_.update(reference);
+        const auto eso_out = yaw_eso_.update(measurement, yaw_adrc_last_u_);
+        const auto nlesf_out = yaw_nlesf_.compute(
+            td_out.x1 - eso_out.z1, td_out.x2 - eso_out.z2, eso_out.z3, yaw_eso_.config().b0);
+
+        const auto final_u =
+            std::clamp(yaw_adrc_kt_ * nlesf_out.u, yaw_adrc_output_min_, yaw_adrc_output_max_);
+        yaw_adrc_last_u_ = final_u;
+
+        *output_.yaw_control_torque = final_u;
+        *output_.yaw_target_velocity = td_out.x2;
+    }
+
+    auto load_adrc_td_config() -> adrc::TD::Config {
+        adrc::TD::Config config;
+        const auto h = get_parameter_or("yaw_adrc_dt", kDefaultDt);
+        config.h = get_parameter_or("yaw_adrc_td_h", h);
+        config.r = get_parameter_or("yaw_adrc_td_r", 300.0);
+        config.max_vel =
+            get_parameter_or("yaw_adrc_td_max_vel", std::numeric_limits<double>::infinity());
+        config.max_acc =
+            get_parameter_or("yaw_adrc_td_max_acc", std::numeric_limits<double>::infinity());
+        return config;
+    }
+
+    auto load_adrc_eso_config() -> adrc::ESO::Config {
+        adrc::ESO::Config config;
+        config.h = get_parameter_or("yaw_adrc_dt", kDefaultDt);
+        config.b0 = get_parameter_or("yaw_adrc_b0", 1.0);
+        config.w0 = get_parameter_or("yaw_adrc_eso_w0", 80.0);
+        config.auto_beta = get_parameter_or("yaw_adrc_eso_auto_beta", true);
+        config.beta1 = get_parameter_or("yaw_adrc_eso_beta1", 3.0 * config.w0);
+        config.beta2 = get_parameter_or("yaw_adrc_eso_beta2", 3.0 * config.w0 * config.w0);
+        config.beta3 = get_parameter_or("yaw_adrc_eso_beta3", config.w0 * config.w0 * config.w0);
+        config.z3_limit = get_parameter_or("yaw_adrc_eso_z3_limit", 1e9);
+        return config;
+    }
+
+    auto load_adrc_nlesf_config() -> adrc::NLESF::Config {
+        adrc::NLESF::Config config;
+        config.k1 = get_parameter_or("yaw_adrc_k1", 50.0);
+        config.k2 = get_parameter_or("yaw_adrc_k2", 5.0);
+        config.alpha1 = get_parameter_or("yaw_adrc_alpha1", 0.75);
+        config.alpha2 = get_parameter_or("yaw_adrc_alpha2", 1.25);
+        config.delta = get_parameter_or("yaw_adrc_delta", 0.01);
+        config.u_min = get_parameter_or("yaw_adrc_u_min", -std::numeric_limits<double>::infinity());
+        config.u_max = get_parameter_or("yaw_adrc_u_max", std::numeric_limits<double>::infinity());
+        return config;
+    }
+
     auto advance_yaw_step_test(double dt) -> void {
         while (yaw_step_active_) {
             yaw_step_phase_elapsed_ += dt;
@@ -432,6 +523,8 @@ private:
         yaw_velocity_pid_.reset();
         pitch_angle_pid_.reset();
         pitch_velocity_pid_.reset();
+        yaw_adrc_last_u_ = 0.0;
+        yaw_angle_unwrapped_ready_ = false;
         *output_.yaw_control_torque = kNaN;
         *output_.yaw_target_angle = kNaN;
         *output_.yaw_target_velocity = kNaN;
@@ -492,6 +585,19 @@ private:
     bool suspension_on_by_switch_ = false;
     rmcs_msgs::Switch last_switch_right_ = rmcs_msgs::Switch::UNKNOWN;
     bool ctrl_hold_active_ = false;
+
+    bool yaw_adrc_enabled_ = false;
+    adrc::TD yaw_td_{load_adrc_td_config()};
+    adrc::ESO yaw_eso_{load_adrc_eso_config()};
+    adrc::NLESF yaw_nlesf_{load_adrc_nlesf_config()};
+    double yaw_adrc_kt_ = 1.0;
+    double yaw_adrc_output_min_ = -std::numeric_limits<double>::infinity();
+    double yaw_adrc_output_max_ = std::numeric_limits<double>::infinity();
+    double yaw_adrc_last_u_ = 0.0;
+
+    double yaw_angle_unwrapped_ = 0.0;
+    double yaw_angle_last_raw_ = 0.0;
+    bool yaw_angle_unwrapped_ready_ = false;
 
     bool yaw_step_test_enabled_ = false;
     std::vector<double> yaw_step_angles_;

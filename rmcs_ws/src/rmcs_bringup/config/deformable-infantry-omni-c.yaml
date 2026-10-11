@@ -222,6 +222,26 @@ gimbal_controller:
     yaw_step_rest: 1.0
     yaw_step_repeat: 2
 
+    # yaw 轴用 LADRC 替代双环 PID，算法复用 controller/adrc 下的实现。
+    # 指数取 1 使反馈律退化为线性。b0 = 1/J，k1 = wc^2，k2 = 2*zeta*wc
+    # w0 取 6*wc：观测器时间常数 1/w0 与快速档的上升过程同量级，取 3*wc 时速度估计
+    # 滞后会使制动指令来晚，小档出现超调
+    # td_r 是安排轨迹的加速度上限，取 tau_max/J = 10/0.124 的八成并扣除摩擦余量，
+    # 使安排轨迹落在实际能输出的角加速度之内，避免阻尼项长时间要求超限幅的力矩
+    # z3_limit 限幅扰动估计：正常工况 |z3| 在 30 以内，力矩指令超出电机能力时该项会失真
+    yaw_adrc_enable: true
+    yaw_adrc_b0: 8.06
+    yaw_adrc_alpha1: 1.0
+    yaw_adrc_alpha2: 1.0
+    yaw_adrc_k1: 625.0
+    yaw_adrc_k2: 75.0
+    yaw_adrc_eso_w0: 75.0
+    yaw_adrc_td_r: 40.0
+    yaw_adrc_eso_z3_limit: 200.0
+    # 输出限幅，与电机实测上限 11.3 N·m 对应
+    yaw_adrc_output_min: -10.0
+    yaw_adrc_output_max: 10.0
+
     pitch_torque_control: true
 
 friction_wheel_controller:
