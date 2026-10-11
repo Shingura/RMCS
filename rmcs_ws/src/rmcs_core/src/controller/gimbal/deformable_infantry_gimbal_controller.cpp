@@ -89,7 +89,7 @@ public:
             if (yaw_step_active_) {
                 const auto target = yaw_step_target_angle();
                 angle_error.yaw_angle_error = normalize_angle(target - *input_.yaw_angle);
-                *output_.yaw_control_angle = target;
+                *output_.yaw_target_angle = target;
             }
         }
 
@@ -103,11 +103,11 @@ public:
             yaw_angle_pid_.reset();
             yaw_velocity_pid_.reset();
             *output_.yaw_control_torque = kNaN;
-            *output_.yaw_control_velocity = kNaN;
+            *output_.yaw_target_velocity = kNaN;
         } else {
             const auto yaw_velocity_ref =
                 yaw_angle_pid_.update(angle_error.yaw_angle_error) + trajectory_ff.yaw_ref_velocity;
-            *output_.yaw_control_velocity = yaw_velocity_ref;
+            *output_.yaw_target_velocity = yaw_velocity_ref;
             *output_.yaw_control_torque =
                 yaw_velocity_pid_.update(yaw_velocity_ref - *input_.yaw_velocity_imu)
                 + trajectory_ff.yaw_velocity + trajectory_ff.yaw_acceleration;
@@ -197,8 +197,8 @@ private:
     struct Output {
         explicit Output(rmcs_executor::Component& component) {
             component.register_output("/gimbal/yaw/control_torque", yaw_control_torque, kNaN);
-            component.register_output("/gimbal/yaw/control_angle", yaw_control_angle, kNaN);
-            component.register_output("/gimbal/yaw/control_velocity", yaw_control_velocity, kNaN);
+            component.register_output("/gimbal/yaw/target_angle", yaw_target_angle, kNaN);
+            component.register_output("/gimbal/yaw/target_velocity", yaw_target_velocity, kNaN);
             component.register_output(
                 "/gimbal/pitch/control_velocity", pitch_control_velocity, kNaN);
             component.register_output("/gimbal/pitch/control_torque", pitch_control_torque, kNaN);
@@ -208,8 +208,8 @@ private:
         }
 
         OutputInterface<double> yaw_control_torque;
-        OutputInterface<double> yaw_control_angle;
-        OutputInterface<double> yaw_control_velocity;
+        OutputInterface<double> yaw_target_angle;
+        OutputInterface<double> yaw_target_velocity;
         OutputInterface<double> pitch_control_velocity;
         OutputInterface<double> pitch_control_torque;
         OutputInterface<double> pitch_control_angle;
@@ -313,7 +313,7 @@ private:
         yaw_step_segments_.clear();
         yaw_angle_pid_.reset();
         yaw_velocity_pid_.reset();
-        *output_.yaw_control_angle = kNaN;
+        *output_.yaw_target_angle = kNaN;
     }
 
     auto advance_yaw_step_test(double dt) -> void {
@@ -400,7 +400,7 @@ private:
         if (!ctrl_hold_active_)
             activate_ctrl_hold();
 
-        *output_.yaw_control_angle = kNaN;
+        *output_.yaw_target_angle = kNaN;
         *output_.pitch_control_velocity = kNaN;
         *output_.pitch_control_torque = kNaN;
         *output_.pitch_control_angle = kNaN;
@@ -433,8 +433,8 @@ private:
         pitch_angle_pid_.reset();
         pitch_velocity_pid_.reset();
         *output_.yaw_control_torque = kNaN;
-        *output_.yaw_control_angle = kNaN;
-        *output_.yaw_control_velocity = kNaN;
+        *output_.yaw_target_angle = kNaN;
+        *output_.yaw_target_velocity = kNaN;
         *output_.pitch_control_velocity = kNaN;
         *output_.pitch_control_torque = kNaN;
         *output_.pitch_control_angle = kNaN;

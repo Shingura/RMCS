@@ -487,7 +487,7 @@ private:
                             }
                                 .as_bytes(),
                     });
-                auto packet_can2_142 = gimbal_yaw_motor_.generate_command();
+                auto packet_can2_142 = gimbal_yaw_motor_.generate_torque_command();
                 builder.can_transmit(
                     Spec::kCans.kCan2,         //
                     {
