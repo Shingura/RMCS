@@ -49,8 +49,8 @@ value_collector:
       - /gimbal/yaw/angle
       - /gimbal/yaw/velocity
       - /gimbal/yaw/velocity_imu
-      - /gimbal/yaw/control_angle
-      - /gimbal/yaw/control_velocity
+      - /gimbal/yaw/target_angle
+      - /gimbal/yaw/target_velocity
       - /gimbal/yaw/control_torque
       - /gimbal/yaw/torque
     write_interval: 5
