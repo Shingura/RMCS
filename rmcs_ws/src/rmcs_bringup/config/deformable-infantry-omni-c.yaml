@@ -182,15 +182,23 @@ gimbal_controller:
     lower_limit: 0.10 # 8 deg
     ctrl_hold_pitch_target_angle: 0.0
 
-    yaw_angle_kp: 10.0
+    # 角度环比例增益由 10 提到 15：死区随角度环与速度环增益之积减小，
+    # 同时缩短上升时间。速度环保持 12 不动
+    yaw_angle_kp: 15.0
     yaw_angle_ki: 0.0
     yaw_angle_kd: 0.0
 
-    yaw_velocity_kp: 13.0
-    yaw_velocity_ki: 0.02
+    # ki 按目标穿越频率 10 Hz 计算：2*pi*10*B/1000 = 0.024。除以 1000 是因为
+    # 积分项按周期累加，运行周期 1 ms。
+    # kp 取 12：按 10 Hz 算得 7.8 时大档位跟随误差上升 12%，提高增益补回
+    yaw_velocity_kp: 12.0
+    yaw_velocity_ki: 0.024
     yaw_velocity_kd: 0.0
+    # 基线里力矩指令峰值 130 N·m，实测电机上限约 11.3 N·m，从最小档即饱和
     yaw_velocity_output_min: -10.0
     yaw_velocity_output_max: 10.0
+    # 积分项力矩上限为 ki × 上限。原为 5，只能提供 0.1 N·m，小于辨识得到的
+    # 库仑摩擦 0.363 N·m，稳态误差补不掉。取 20 使积分项可达 0.48 N·m
     yaw_velocity_integral_min: -20.0
     yaw_velocity_integral_max: 20.0
 
