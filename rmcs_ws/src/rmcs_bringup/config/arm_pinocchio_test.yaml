@@ -1,0 +1,33 @@
+rmcs_executor:
+  ros__parameters:
+    update_rate: 1000.0
+    components:
+      - rmcs_core::hardware::ArmPinocchioTest -> arm_test_hardware
+      - rmcs_core::controller::arm::ArmConfig -> arm_config
+      - rmcs_core::controller::arm::ArmTestController -> arm_test_controller
+      - rmcs_core::controller::arm::ArmSolver -> arm_solver
+
+arm_test_hardware:
+  ros__parameters:
+    connect_hardware: false
+    feedback_timeout_ms: 100
+    # Copied from lunar_rover_engineer; replace serials/zero points for the bench arm.
+    board_serial_arm_board: "D4-D354-B7C8-A457-ECB1-11A9-998E"
+    board_serial_encoder_board: "D4-9C35-EDF1-2B20-7AE6-4ED0-8308"
+    joint1_zero_point: 14669
+    joint2_zero_point: 39433
+    joint3_zero_point: 29072
+    joint4_zero_point: 33493
+    joint5_zero_point: 60137
+    joint6_zero_point: 12793
+
+arm_solver:
+  ros__parameters:
+    # gravity still uses the existing hand-derived formula until the solver is migrated.
+    controller_list: [pid, gravity, friction]
+    joint_6_angle_kp: 120.0
+    joint_6_angle_ki: 0.0
+    joint_6_angle_kd: 0.04
+    joint_6_vel_kp: 0.0908
+    joint_6_vel_ki: 0.0
+    joint_6_vel_kd: 0.030

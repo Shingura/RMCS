@@ -1,16 +1,30 @@
 #include "controller/pid/pid_calculator.hpp"
+#include "pinocchio/multibody/fwd.hpp"
+#include "std_msgs/msg/string.hpp"
+
 #include <Eigen/Dense>
+#include <Eigen/src/Core/Matrix.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <exception>
 #include <numbers>
-#include <rclcpp/logging.hpp>
-#include <rclcpp/rclcpp.hpp>
-#include <rmcs_executor/component.hpp>
-#include <rmcs_utility/normalize_angle.hpp>
+#include <rclcpp/subscription.hpp>
 #include <string>
 #include <tuple>
 #include <unordered_set>
+
+#include <rclcpp/logging.hpp>
+#include <rclcpp/rclcpp.hpp>
+
+#include <rmcs_executor/component.hpp>
+#include <rmcs_utility/normalize_angle.hpp>
+
+#include <pinocchio/multibody/model.hpp>
+#include <pinocchio/parsers/urdf.hpp>
+#include <pinocchio/algorithm/rnea.hpp>
+#include <pinocchio/multibody/data.hpp>
+
 namespace rmcs_core::controller::arm {
 
 class ArmSolver final
@@ -60,6 +74,12 @@ public:
             register_input(link_prefix + "/length", link_length[i]);
         }
 
+        urdf_subscription = this->create_subscription<std_msgs::msg::String>(
+            "/robot_description", rclcpp::QoS(1).transient_local().reliable(),
+            [this](const std_msgs::msg::String::ConstSharedPtr& msg) {
+                load_pinocchio_model(msg->data);
+            });
+
         register_input("urdf_loaded", is_loaded);
         register_input("/arm/joint_4/position", joint4_position);
         register_input("/arm/enable_flag", is_arm_enable);
@@ -69,7 +89,7 @@ public:
     }
 
     void update() override {
-        if (!*is_loaded)
+        if (!*is_loaded || !is_pinocchio_ready)
             return;
         TorqueVec tau_cmd;
         tau_cmd.setZero();
@@ -95,6 +115,28 @@ public:
 
 private:
     using controller_type = TorqueVec (ArmSolver::*)();
+
+    void load_pinocchio_model(const std::string& urdf_xml) {
+        pinocchio::Model model;
+
+        try {
+            pinocchio::urdf::buildModelFromXML(urdf_xml, model);
+        } catch (const std::exception& err) {
+            RCLCPP_ERROR(
+                this->get_logger(),
+                "Pinocchio URDF parse failed: %s",
+                err.what());
+            return;
+        }
+
+        model.gravity.linear() = Eigen::Vector3d(0.0, 0.0, -9.81);
+
+        pinocchio::Data data(model);
+
+        pinocchio_model_ = model;
+        pinocchio_data_ = data;
+        is_pinocchio_ready = true;
+    }
 
     TorqueVec calculate_pid() {
         auto clamp_target_theta = [this](std::size_t idx, double target_theta) {
@@ -146,6 +188,7 @@ private:
         return tau_f;
     }
 
+    // To be replaced by Pinocchio
     TorqueVec calculate_gravity_compensation() {
         // The gravity compensation theoretical calculation for joint1 and joint6 is 0.
         static constexpr double g = 9.81;
@@ -241,6 +284,11 @@ private:
             }
         }
     }
+
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr urdf_subscription;
+    pinocchio::Model pinocchio_model_;
+    pinocchio::Data pinocchio_data_;
+
     std::array<pid::PidCalculator, num_axis> joint_angle_pid_controller;
     std::array<pid::PidCalculator, num_axis> joint_vel_pid_controller;
 
@@ -259,6 +307,7 @@ private:
     InputInterface<Eigen::Vector3d> joint4_position;
     InputInterface<bool> is_arm_enable;
     bool last_arm_enable_ = false;
+    bool is_pinocchio_ready = false;
 
     InputInterface<bool> is_loaded;
 };

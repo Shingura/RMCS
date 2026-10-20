@@ -1,4 +1,10 @@
 <library path="rmcs_core">
+  <class type="rmcs_core::hardware::ArmPinocchioTest" base_class_type="rmcs_executor::Component">
+    <description>Standalone six-axis arm hardware for bench testing.</description>
+  </class>
+  <class type="rmcs_core::controller::arm::ArmTestController" base_class_type="rmcs_executor::Component">
+    <description>Standalone arm enable and joint-target interface.</description>
+  </class>
   <class type="rmcs_core::hardware::cboard::Status" base_class_type="rmcs_executor::Component">
     <description>Test plugin.</description>
   </class>
