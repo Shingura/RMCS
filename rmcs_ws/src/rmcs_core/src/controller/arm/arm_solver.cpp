@@ -7,9 +7,13 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <exception>
+#include <memory>
+#include <atomic>
 #include <numbers>
 #include <rclcpp/subscription.hpp>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <unordered_set>
@@ -34,6 +38,11 @@ class ArmSolver final
     static constexpr std::size_t num_axis = 6;
     using TorqueVec = Eigen::Array<double, num_axis, 1>;
 
+    struct PinocchioModel {
+        pinocchio::Model model;
+        std::array<pinocchio::JointIndex, num_axis> joint_ids{};
+    };
+
 public:
     explicit ArmSolver()
         : Node(
@@ -46,7 +55,7 @@ public:
               pid::PidCalculator(250.0, 0.0, 1.0), // joint_4
               pid::PidCalculator(300.0, 0.0, 8.0), // joint_5
               pid::PidCalculator(this->get_parameter("joint_6_angle_kp").as_double(), this->get_parameter("joint_6_angle_ki").as_double(), this->get_parameter("joint_6_angle_kd").as_double()), // joint_6
-          }
+        }
         , joint_vel_pid_controller{
               pid::PidCalculator(0.6, 0.0, 0.01), // joint_1
               pid::PidCalculator(3.0, 0.0, 0.0), // joint_2
@@ -54,7 +63,7 @@ public:
               pid::PidCalculator(0.65, 0.0, 0.002), // joint_4
               pid::PidCalculator(0.282, 0.0, 0.004), // joint_5
               pid::PidCalculator(this->get_parameter("joint_6_vel_kp").as_double(), this->get_parameter("joint_6_vel_ki").as_double(), this->get_parameter("joint_6_vel_kd").as_double()), // joint_6
-          } {
+        } {
         for (std::size_t i = 0; i < num_axis; ++i) {
             const std::string joint_prefix = "/arm/joint_" + std::to_string(i + 1);
             register_input(joint_prefix + "/theta", joint_theta[i]);
@@ -80,7 +89,7 @@ public:
                 load_pinocchio_model(msg->data);
             });
 
-        register_input("urdf_loaded", is_loaded);
+        register_input("urdf_loaded", is_urdf_loaded);
         register_input("/arm/joint_4/position", joint4_position);
         register_input("/arm/enable_flag", is_arm_enable);
 
@@ -89,10 +98,27 @@ public:
     }
 
     void update() override {
-        if (!*is_loaded || !is_pinocchio_ready)
+        const auto model = published_model_.load(std::memory_order_acquire);
+
+        if (!*is_urdf_loaded || !model) {
+            TorqueVec tau_cmd;
+            tau_cmd.fill(NAN);
+
+            for (std::size_t i = 0; i < num_axis; ++i)
+                *joint_control_torque[i] = tau_cmd(i);
+
+            last_arm_enable_ = false;
             return;
+        }
+
+        if (active_model_ != model) {
+            active_data_ = std::make_unique<pinocchio::Data>(model->model);
+            active_model_ = model;
+        }
+
         TorqueVec tau_cmd;
         tau_cmd.setZero();
+
         if (*is_arm_enable) {
             if (!last_arm_enable_) {
                 for (auto& pid : joint_angle_pid_controller)
@@ -100,13 +126,16 @@ public:
                 for (auto& pid : joint_vel_pid_controller)
                     pid.reset();
             }
+
             for (auto fn : controller_list) {
                 tau_cmd += (this->*fn)();
             }
         } else {
             tau_cmd = calculate_zero_torque();
         }
+
         last_arm_enable_ = *is_arm_enable;
+
         for (std::size_t i = 0; i < num_axis; ++i) {
             *joint_control_torque[i] = tau_cmd(i);
         }
@@ -117,10 +146,57 @@ private:
     using controller_type = TorqueVec (ArmSolver::*)();
 
     void load_pinocchio_model(const std::string& urdf_xml) {
-        pinocchio::Model model;
+        auto new_model = std::make_shared<PinocchioModel>();
 
         try {
-            pinocchio::urdf::buildModelFromXML(urdf_xml, model);
+            pinocchio::urdf::buildModelFromXML(urdf_xml, new_model->model);
+
+            auto& model = new_model->model;
+
+            if ((model.nq != static_cast<int>(num_axis))
+            ||  model.nv != static_cast<int>(num_axis)) {
+                throw std::runtime_error(
+                    "Expected a " + std::to_string(num_axis) + "-DOF model, but got nq="
+                    + std::to_string(model.nq)
+                    + ", nv="
+                    + std::to_string(model.nv));
+            }
+
+            std::array<pinocchio::JointIndex, num_axis> joint_ids{};
+
+            for (std::size_t i = 0; i < num_axis; ++i) {
+                const std::string joint_name = "joint_" + std::to_string(i + 1);
+                const auto joint_id = model.getJointId(joint_name);
+
+                if (joint_id == 0) {
+                    throw std::runtime_error(
+                        "Pinocchio joint not found: " + joint_name);
+                }
+
+                if (model.nqs[joint_id] != 1 || model.nvs[joint_id] != 1) {
+                    throw std::runtime_error(
+                        "Pinocchio joint is not one-DOF: " + joint_name);
+                }
+
+                joint_ids[i] = joint_id;
+
+                RCLCPP_INFO(
+                    this->get_logger(),
+                    "Pinocchio joint[%zu]: name=%s, id=%zu, q_index=%d, v_index=%d",
+                    i, joint_name.c_str(), joint_id, model.idx_qs[joint_id], model.idx_vs[joint_id]);
+            }
+
+            // Orientation of gravity
+            model.gravity.linear() = Eigen::Vector3d(0.0, 0.0, -9.81);
+
+            RCLCPP_INFO(
+                get_logger(),
+                "Pinocchio model loaded: nq=%d, nv=%d, joints=%d",
+                model.nq, model.nv, model.njoints);
+
+            std::shared_ptr<const PinocchioModel> ready_model = new_model;
+            published_model_.store(ready_model, std::memory_order_release);
+
         } catch (const std::exception& err) {
             RCLCPP_ERROR(
                 this->get_logger(),
@@ -128,14 +204,6 @@ private:
                 err.what());
             return;
         }
-
-        model.gravity.linear() = Eigen::Vector3d(0.0, 0.0, -9.81);
-
-        pinocchio::Data data(model);
-
-        pinocchio_model_ = model;
-        pinocchio_data_ = data;
-        is_pinocchio_ready = true;
     }
 
     TorqueVec calculate_pid() {
@@ -164,6 +232,7 @@ private:
 
         return tau_pid;
     }
+
     TorqueVec calculate_friction_compensation() {
         // tau_f = tau_c * tanh(dq / v0)
         // joint1, joint5, joint6 = 0  (manually disabled, feel was not good)
@@ -186,6 +255,38 @@ private:
         tau_f(5) = 0.0;
 
         return tau_f;
+    }
+
+    TorqueVec calculate_gravity_compensation_with_pinocchio() {
+        TorqueVec tau_g;
+        tau_g.setZero();
+
+        if (!active_model_ || !active_data_)
+            return tau_g;
+
+        const auto& model = active_model_->model;
+
+        Eigen::VectorXd q = Eigen::VectorXd::Zero(model.nq);
+
+        for (std::size_t i = 0; i < num_axis; ++i) {
+            const auto joint_id = active_model_->joint_ids[i];
+            const auto q_index = model.idx_qs[joint_id];
+
+            q(q_index) = *joint_theta[i];
+        }
+
+        const Eigen::VectorXd& gravity =
+            pinocchio::computeGeneralizedGravity(model, *active_data_, q);
+
+        for (std::size_t i = 0; i < num_axis; ++i) {
+            const auto joint_id = active_model_->joint_ids[i];
+
+            const auto v_index = model.idx_vs[joint_id];
+
+            tau_g(i) = gravity(v_index);
+        }
+
+        return tau_g;
     }
 
     // To be replaced by Pinocchio
@@ -239,17 +340,19 @@ private:
 
         return tau_g;
     }
+
     TorqueVec calculate_zero_torque() {
         TorqueVec tau;
         tau.fill(NAN);
         return tau;
     }
 
-    static constexpr std::array<std::tuple<std::string_view, controller_type>, 4> term_table_{
-        {{"gravity", &ArmSolver::calculate_gravity_compensation},
-         {"pid", &ArmSolver::calculate_pid},
-         {"friction", &ArmSolver::calculate_friction_compensation},
-         {"zero_torque", &ArmSolver::calculate_zero_torque}}};
+    static constexpr std::array<std::tuple<std::string_view, controller_type>, 5> term_table_{{
+        {"gravity", &ArmSolver::calculate_gravity_compensation},
+        {"gravity_pinocchio", &ArmSolver::calculate_gravity_compensation_with_pinocchio},
+        {"pid", &ArmSolver::calculate_pid},
+        {"friction", &ArmSolver::calculate_friction_compensation},
+        {"zero_torque", &ArmSolver::calculate_zero_torque}}};
 
     std::vector<controller_type> controller_list;
 
@@ -285,9 +388,11 @@ private:
         }
     }
 
+    std::atomic<std::shared_ptr<const PinocchioModel>> published_model_{nullptr};
+    std::shared_ptr<const PinocchioModel> active_model_;
+    std::unique_ptr<pinocchio::Data> active_data_;
+
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr urdf_subscription;
-    pinocchio::Model pinocchio_model_;
-    pinocchio::Data pinocchio_data_;
 
     std::array<pid::PidCalculator, num_axis> joint_angle_pid_controller;
     std::array<pid::PidCalculator, num_axis> joint_vel_pid_controller;
@@ -307,9 +412,9 @@ private:
     InputInterface<Eigen::Vector3d> joint4_position;
     InputInterface<bool> is_arm_enable;
     bool last_arm_enable_ = false;
-    bool is_pinocchio_ready = false;
 
-    InputInterface<bool> is_loaded;
+
+    InputInterface<bool> is_urdf_loaded;
 };
 
 } // namespace rmcs_core::controller::arm

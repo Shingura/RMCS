@@ -24,7 +24,8 @@ arm_test_hardware:
 arm_solver:
   ros__parameters:
     # gravity still uses the existing hand-derived formula until the solver is migrated.
-    controller_list: [pid, gravity, friction]
+    # controller_list: [pid, gravity, friction]
+    controller_list: [gravity_pinocchio]
     joint_6_angle_kp: 120.0
     joint_6_angle_ki: 0.0
     joint_6_angle_kd: 0.04

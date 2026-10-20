@@ -16,20 +16,19 @@ class ArmTestController final
 public:
     ArmTestController()
         : Node(
-                get_component_name(),
-                rclcpp::NodeOptions{}.automatically_declare_parameters_from_overrides(true)) {
-        register_output("/arm/enable_flag", enabled_, false);
+        get_component_name(),
+        rclcpp::NodeOptions{}.automatically_declare_parameters_from_overrides(true)) {
+            register_output("/arm/enable_flag", enabled_, false);
 
-        for (std::size_t i = 0; i < num_axes; ++i) {
-            const auto prefix = "/arm/joint_" + std::to_string(i + 1);
-            register_input(prefix + "/theta", theta_[i]);
-            register_output(prefix + "/target_theta", target_[i], 0.0);
-        }
+            for (std::size_t i = 0; i < num_axes; ++i) {
+                const auto prefix = "/arm/joint_" + std::to_string(i + 1);
+                register_input(prefix + "/theta", theta_[i]);
+                register_output(prefix + "/target_theta", target_[i], 0.0);
+            }
     }
 
     void update() override {
-        // Keep the controller disabled until an external test input is explicitly designed.
-        *enabled_ = false;
+        *enabled_ = true;
         for (std::size_t i = 0; i < num_axes; ++i)
             *target_[i] = *theta_[i];
     }
