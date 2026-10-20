@@ -2,10 +2,6 @@
 
 source /opt/ros/jazzy/setup.bash
 
-# Debian ROS installs vendor prefixes in CMAKE_PREFIX_PATH, but the ROS
-# prefix itself is still needed for find_package() to locate package configs.
-export CMAKE_PREFIX_PATH="/opt/ros/jazzy${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
-
 : "${RMCS_PATH:=/workspaces/RMCS}"
 
 if [[ ! -d "${RMCS_PATH}/rmcs_ws" ]]; then

@@ -14,16 +14,7 @@ endif()
 find_package(ament_cmake_auto REQUIRED)
 include(FetchContent)
 
-ament_auto_find_build_dependencies(
-  REQUIRED
-  moveit_core
-  geometric_shapes
-  moveit_ros_planning_interface
-  moveit_ros_move_group
-  moveit_ros_planning
-  moveit_ros_visualization
-  moveit_visual_tools
-)
+ament_auto_find_build_dependencies()
 
 set(BUILD_STATIC_LIBRMCS ON CACHE BOOL "Build static librmcs SDK" FORCE)
 FetchContent_Declare(
