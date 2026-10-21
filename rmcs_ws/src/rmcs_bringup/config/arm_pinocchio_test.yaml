@@ -11,9 +11,13 @@ arm_test_hardware:
   ros__parameters:
     connect_hardware: false
     feedback_timeout_ms: 100
-    # Copied from lunar_rover_engineer; replace serials/zero points for the bench arm.
+    # Copied from lunar_rover_engineer; replace the serial and zero points for the bench arm.
+    # The board is now an RMCS Board Lite, so this string must be replaced by that board's serial.
     board_serial_arm_board: "D4-D354-B7C8-A457-ECB1-11A9-998E"
-    board_serial_encoder_board: "D4-9C35-EDF1-2B20-7AE6-4ED0-8308"
+    # CAN wiring on that board:
+    #   kCan0: joint 1..3 (0x141, 0x142, 0x143)
+    #   kCan1: joint 4..6 (0x144, 0x145, 0x141)
+    #   kCan2: joint 2 absolute encoder (0x200)
     joint1_zero_point: 14669
     joint2_zero_point: 39433
     joint3_zero_point: 29072
@@ -23,7 +27,6 @@ arm_test_hardware:
 
 arm_solver:
   ros__parameters:
-    # gravity still uses the existing hand-derived formula until the solver is migrated.
     # controller_list: [pid, gravity, friction]
     controller_list: [gravity_pinocchio]
     joint_6_angle_kp: 120.0

@@ -79,3 +79,4 @@ cache
 
 # Ignore agent files
 .agents/
+.codebuddy/

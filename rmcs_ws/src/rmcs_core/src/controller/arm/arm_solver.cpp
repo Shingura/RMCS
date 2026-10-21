@@ -39,7 +39,7 @@ class ArmSolver final
     using TorqueVec = Eigen::Array<double, num_axis, 1>;
 
     struct PinocchioModel {
-        pinocchio::Model model;
+        pinocchio::Model pinocchio_model;
         std::array<pinocchio::JointIndex, num_axis> joint_ids{};
     };
 
@@ -98,7 +98,9 @@ public:
     }
 
     void update() override {
-        const auto model = published_model_.load(std::memory_order_acquire);
+        // Load latest model received from subscription
+        // Use atomic to avoid thread conflict
+        const auto model = latest_received_model_.load(std::memory_order_acquire);
 
         if (!*is_urdf_loaded || !model) {
             TorqueVec tau_cmd;
@@ -111,9 +113,20 @@ public:
             return;
         }
 
-        if (active_model_ != model) {
-            active_data_ = std::make_unique<pinocchio::Data>(model->model);
-            active_model_ = model;
+        // When model is updated
+        if (in_use_model_ != model) {
+            const auto& pinocchio_model = model->pinocchio_model;
+
+            in_use_data_ = std::make_unique<pinocchio::Data>(model->pinocchio_model);
+            joint_position_.setZero(pinocchio_model.nq);
+
+            for (std::size_t i = 0; i < num_axis; ++i) {
+                const auto joint_id = model->joint_ids[i];
+                q_index_[i] = pinocchio_model.idx_qs[joint_id];
+                v_index_[i] = pinocchio_model.idx_vs[joint_id];
+            }
+
+            in_use_model_ = model;
         }
 
         TorqueVec tau_cmd;
@@ -145,13 +158,14 @@ public:
 private:
     using controller_type = TorqueVec (ArmSolver::*)();
 
+    /// @brief /robot_description 的订阅回调，从 URDF 的 XML 建模
     void load_pinocchio_model(const std::string& urdf_xml) {
-        auto new_model = std::make_shared<PinocchioModel>();
+        auto building_model = std::make_shared<PinocchioModel>();
 
         try {
-            pinocchio::urdf::buildModelFromXML(urdf_xml, new_model->model);
+            pinocchio::urdf::buildModelFromXML(urdf_xml, building_model->pinocchio_model);
 
-            auto& model = new_model->model;
+            auto& model = building_model->pinocchio_model;
 
             if ((model.nq != static_cast<int>(num_axis))
             ||  model.nv != static_cast<int>(num_axis)) {
@@ -194,8 +208,10 @@ private:
                 "Pinocchio model loaded: nq=%d, nv=%d, joints=%d",
                 model.nq, model.nv, model.njoints);
 
-            std::shared_ptr<const PinocchioModel> ready_model = new_model;
-            published_model_.store(ready_model, std::memory_order_release);
+            // Store latest model received from subscription, 
+            // to be used by update() to detect model changes
+            // Use atomic to avoid thread conflict
+            latest_received_model_.store(building_model, std::memory_order_release);
 
         } catch (const std::exception& err) {
             RCLCPP_ERROR(
@@ -261,35 +277,25 @@ private:
         TorqueVec tau_g;
         tau_g.setZero();
 
-        if (!active_model_ || !active_data_)
+        if (!in_use_model_ || !in_use_data_)
             return tau_g;
 
-        const auto& model = active_model_->model;
-
-        Eigen::VectorXd q = Eigen::VectorXd::Zero(model.nq);
+        const auto& pinocchio_model = in_use_model_->pinocchio_model;
 
         for (std::size_t i = 0; i < num_axis; ++i) {
-            const auto joint_id = active_model_->joint_ids[i];
-            const auto q_index = model.idx_qs[joint_id];
-
-            q(q_index) = *joint_theta[i];
+            joint_position_(q_index_[i]) = *joint_theta[i];
         }
 
         const Eigen::VectorXd& gravity =
-            pinocchio::computeGeneralizedGravity(model, *active_data_, q);
+            pinocchio::computeGeneralizedGravity(pinocchio_model, *in_use_data_, joint_position_);
 
         for (std::size_t i = 0; i < num_axis; ++i) {
-            const auto joint_id = active_model_->joint_ids[i];
-
-            const auto v_index = model.idx_vs[joint_id];
-
-            tau_g(i) = gravity(v_index);
+            tau_g(i) = gravity(v_index_[i]);
         }
 
         return tau_g;
     }
 
-    // To be replaced by Pinocchio
     TorqueVec calculate_gravity_compensation() {
         // The gravity compensation theoretical calculation for joint1 and joint6 is 0.
         static constexpr double g = 9.81;
@@ -388,9 +394,13 @@ private:
         }
     }
 
-    std::atomic<std::shared_ptr<const PinocchioModel>> published_model_{nullptr};
-    std::shared_ptr<const PinocchioModel> active_model_;
-    std::unique_ptr<pinocchio::Data> active_data_;
+    std::atomic<std::shared_ptr<const PinocchioModel>> latest_received_model_{nullptr};
+    std::shared_ptr<const PinocchioModel> in_use_model_;
+    std::unique_ptr<pinocchio::Data> in_use_data_;
+
+    Eigen::VectorXd joint_position_;
+    std::array<std::size_t, num_axis> q_index_{};
+    std::array<std::size_t, num_axis> v_index_{};
 
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr urdf_subscription;
 

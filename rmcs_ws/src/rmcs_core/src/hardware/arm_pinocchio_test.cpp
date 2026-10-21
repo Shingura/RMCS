@@ -11,14 +11,19 @@
 #include <stdexcept>
 #include <string>
 
-#include <librmcs/board/c_board.hpp>
+#include <librmcs/board/rmcs_board_lite.hpp>
 #include <pluginlib/class_list_macros.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rmcs_executor/component.hpp>
 
 namespace rmcs_core::hardware {
 
-// Six joints and the joint-2 absolute encoder
+// Six joints and the joint-2 absolute encoder, all on one RMCS Board Lite.
+//
+// CAN assignment on the board:
+//   kCan0: joint 1..3 motors (0x141, 0x142, 0x143)
+//   kCan1: joint 4..6 motors (0x144, 0x145, 0x141)
+//   kCan2: joint 2 absolute encoder (0x200)
 class ArmPinocchioTest final
     : public rmcs_executor::Component
     , public rclcpp::Node {
@@ -45,11 +50,11 @@ class ArmPinocchioTest final
         InputInterface<bool> ready_;
     };
 
-    class ArmBoard final : public librmcs::board::CBoard::Callback {
+    class ArmBoard final : public librmcs::board::RmcsBoardLite::Callback {
     public:
         ArmBoard(ArmPinocchioTest& hardware, const std::string& serial)
             : hardware_(hardware) {
-            board_ = std::make_unique<librmcs::board::CBoard>(
+            board_ = std::make_unique<librmcs::board::RmcsBoardLite>(
                 *this, serial,
                 librmcs::board::AdvancedOptions{}.set_dangerously_skip_version_checks(true));
         }
@@ -67,7 +72,7 @@ class ArmPinocchioTest final
             auto tx = board_->start_transmit();
             // Alternate three joints each tick: every joint is commanded at 500 Hz.
             for (std::size_t i = phase_; i < num_axes; i += 2) {
-                const auto& can = i < 3 ? Spec::kCans.kCan1 : Spec::kCans.kCan2;
+                const auto& can = motor_can(i);
                 auto packet = enabled ? hardware_.joints_[i].generate_torque_command()
                                         : device::LKMotor::lk_zero_torque_command();
                 tx.can_transmit(can, {.can_id = can_ids_[i], .can_data = packet.as_bytes()});
@@ -80,11 +85,20 @@ class ArmPinocchioTest final
             if (data.is_fdcan || data.is_extended_can_id || data.is_remote_transmission
                 || data.can_data.size() != 8)
                 return;
+
+            // Check the encoder frame before the motor command-byte filter below:
+            // the first byte of an encoder frame carries angle data, not a command code.
+            if (can == encoder_can() && data.can_id == joint2_encoder_can_id_) {
+                hardware_.joint2_encoder_.store_status(data.can_data);
+                hardware_.last_feedback_[num_axes].store(Clock::now(), std::memory_order_release);
+                return;
+            }
+
             const auto command = std::to_integer<std::uint8_t>(data.can_data.front());
             if (command != 0x9C && command != 0xA4 && command != 0xA1 && command != 0xAD)
                 return;
             for (std::size_t i = 0; i < num_axes; ++i) {
-                const auto& expected_can = i < 3 ? Spec::kCans.kCan1 : Spec::kCans.kCan2;
+                const auto& expected_can = motor_can(i);
                 if (can == expected_can && data.can_id == can_ids_[i]) {
                     hardware_.joints_[i].store_status(data.can_data);
                     hardware_.last_feedback_[i].store(Clock::now(), std::memory_order_release);
@@ -93,36 +107,20 @@ class ArmPinocchioTest final
             }
         }
 
+        static constexpr const Spec::Can& motor_can(std::size_t joint_index) {
+            return joint_index < 3 ? Spec::kCans.kCan0 : Spec::kCans.kCan1;
+        }
+
+        static constexpr const Spec::Can& encoder_can() { return Spec::kCans.kCan2; }
+
         static constexpr std::array<std::uint32_t, num_axes> can_ids_{0x141, 0x142, 0x143,
                                                                       0x144, 0x145, 0x141};
+        static constexpr std::uint32_t joint2_encoder_can_id_ = 0x200;
+
         ArmPinocchioTest& hardware_;
         std::size_t phase_{0};
         // Destroy the transport before the callback state it accesses.
-        std::unique_ptr<librmcs::board::CBoard> board_;
-    };
-
-    class EncoderBoard final : public librmcs::board::CBoard::Callback {
-    public:
-        EncoderBoard(ArmPinocchioTest& hardware, const std::string& serial)
-            : hardware_(hardware) {
-            board_ = std::make_unique<librmcs::board::CBoard>(
-                *this, serial,
-                librmcs::board::AdvancedOptions{}.set_dangerously_skip_version_checks(true));
-        }
-
-    private:
-        void can_receive_callback(const Spec::Can& can, const View::Can& data) override {
-            if (data.is_fdcan || data.is_extended_can_id || data.is_remote_transmission
-                || data.can_data.size() != 8)
-                return;
-            if (can == Spec::kCans.kCan1 && data.can_id == 0x200) {
-                hardware_.joint2_encoder_.store_status(data.can_data);
-                hardware_.last_feedback_[num_axes].store(Clock::now(), std::memory_order_release);
-            }
-        }
-
-        ArmPinocchioTest& hardware_;
-        std::unique_ptr<librmcs::board::CBoard> board_;
+        std::unique_ptr<librmcs::board::RmcsBoardLite> board_;
     };
 
 public:
@@ -163,11 +161,9 @@ public:
 
         if (get_parameter("connect_hardware").as_bool()) {
             const auto arm_serial = get_parameter("board_serial_arm_board").as_string();
-            const auto encoder_serial = get_parameter("board_serial_encoder_board").as_string();
-            if (arm_serial.empty() || encoder_serial.empty() || arm_serial == encoder_serial)
-                throw std::invalid_argument("Set distinct arm and encoder board serial numbers");
+            if (arm_serial.empty())
+                throw std::invalid_argument("Set the arm board serial number");
             arm_board_ = std::make_unique<ArmBoard>(*this, arm_serial);
-            encoder_board_ = std::make_unique<EncoderBoard>(*this, encoder_serial);
         } else {
             RCLCPP_INFO(
                 get_logger(),
@@ -205,7 +201,6 @@ private:
     std::chrono::milliseconds feedback_timeout_{100};
     std::array<std::atomic<TimePoint>, num_axes + 1> last_feedback_;
     std::unique_ptr<ArmBoard> arm_board_;
-    std::unique_ptr<EncoderBoard> encoder_board_;
 };
 
 } // namespace rmcs_core::hardware
