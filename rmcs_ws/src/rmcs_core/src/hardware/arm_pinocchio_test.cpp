@@ -54,6 +54,41 @@ class ArmPinocchioTest final
         InputInterface<bool> ready_;
     };
 
+    // Debug-only component: reads the torque command each motor driver consumes and prints it in
+    // the motor frame, at most once per second.
+    //
+    // The inputs cannot live in the hardware component, because the hardware provides the motor
+    // feedback that arm_config needs; an input there would close the cycle
+    // hardware -> arm_config -> arm_solver -> hardware.
+    // They cannot live in Command either, because LKMotor already registers them on it.
+    // This component has no outputs, so it never affects the update order.
+    class TorqueWatcher final : public rmcs_executor::Component {
+    public:
+        explicit TorqueWatcher(ArmPinocchioTest& hardware)
+            : hardware_(hardware) {
+            for (std::size_t i = 0; i < num_axes; ++i)
+                register_input(
+                    "/arm/joint_" + std::to_string(i + 1) + "/motor/control_torque",
+                    commanded_torque_[i]);
+        }
+
+        void update() override {
+            const auto t0 = hardware_.motor_torque(0, *commanded_torque_[0]);
+            const auto t1 = hardware_.motor_torque(1, *commanded_torque_[1]);
+            const auto t2 = hardware_.motor_torque(2, *commanded_torque_[2]);
+            const auto t3 = hardware_.motor_torque(3, *commanded_torque_[3]);
+            const auto t4 = hardware_.motor_torque(4, *commanded_torque_[4]);
+            const auto t5 = hardware_.motor_torque(5, *commanded_torque_[5]);
+            RCLCPP_INFO_THROTTLE(
+                hardware_.get_logger(), *hardware_.get_clock(), 1000,
+                "motor torque: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f] N*m", t0, t1, t2, t3, t4, t5);
+        }
+
+    private:
+        ArmPinocchioTest& hardware_;
+        std::array<InputInterface<double>, num_axes> commanded_torque_;
+    };
+
     class ArmBoard final : public librmcs::board::RmcsBoardLite::Callback {
     public:
         ArmBoard(ArmPinocchioTest& hardware, const std::string& serial)
@@ -139,6 +174,8 @@ public:
               get_component_name(),
               rclcpp::NodeOptions{}.automatically_declare_parameters_from_overrides(true))
         , command_(create_partner_component<Command>(get_component_name() + "_command", *this))
+        , torque_watcher_(create_partner_component<TorqueWatcher>(
+              get_component_name() + "_torque_watcher", *this))
         , joints_{{{*this, *command_, "/arm/joint_1/motor"}, {*this, *command_, "/arm/joint_2/motor"}, {*this, *command_, "/arm/joint_3/motor"}, {*this, *command_, "/arm/joint_4/motor"}, {*this, *command_, "/arm/joint_5/motor"}, {*this, *command_, "/arm/joint_6/motor"}}}
         , joint2_encoder_(*this, "/arm/joint_2/encoder") {
         using namespace device;
@@ -158,12 +195,6 @@ public:
         feedback_timeout_ = std::chrono::milliseconds(timeout);
         for (auto& time : last_feedback_)
             time.store(TimePoint::min(), std::memory_order_relaxed);
-
-        // Debug print of the torque command in the motor frame, see update().
-        for (std::size_t i = 0; i < num_axes; ++i)
-            register_input(
-                "/arm/joint_" + std::to_string(i + 1) + "/motor/control_torque",
-                commanded_torque_[i]);
 
         // Must match the reverse() flags below: joints 1, 2 and 6 are reversed.
         motor_direction_ = {-1.0, -1.0, 1.0, 1.0, 1.0, -1.0};
@@ -209,12 +240,6 @@ public:
         *remote_switch_right_ = dr16_.switch_right();
 
         *all_feedback_fresh_ = feedback_fresh();
-
-        // Debug output: torque in the motor frame, at most once per second.
-        RCLCPP_INFO_THROTTLE(
-            get_logger(), *get_clock(), 1000,
-            "motor torque: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f] N*m", motor_torque(0),
-            motor_torque(1), motor_torque(2), motor_torque(3), motor_torque(4), motor_torque(5));
     }
 
 private:
@@ -246,14 +271,14 @@ private:
 
     // Torque the driver sends for joint i: direction applied, clamped to the motor limit.
     // A NaN command stays NaN, so a disabled controller remains visible in the log.
-    double motor_torque(std::size_t i) {
+    double motor_torque(std::size_t i, double command) {
         const double limit = joints_[i].get_max_torque();
-        return std::clamp(motor_direction_[i] * (*commanded_torque_[i]), -limit, limit);
+        return std::clamp(motor_direction_[i] * command, -limit, limit);
     }
 
     std::shared_ptr<Command> command_;
+    std::shared_ptr<TorqueWatcher> torque_watcher_;
     std::array<device::LKMotor, num_axes> joints_;
-    std::array<InputInterface<double>, num_axes> commanded_torque_;
     std::array<double, num_axes> motor_direction_{};
     device::Encoder joint2_encoder_;
     device::Dr16 dr16_;
