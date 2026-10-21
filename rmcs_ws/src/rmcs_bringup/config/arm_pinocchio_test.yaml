@@ -35,3 +35,4 @@ arm_solver:
     joint_6_vel_kp: 0.0908
     joint_6_vel_ki: 0.0
     joint_6_vel_kd: 0.030
+    # The solver prints the total torque command once per second (see update()).

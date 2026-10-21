@@ -1,6 +1,8 @@
+#include "hardware/device/dr16.hpp"
 #include "hardware/device/encorder.hpp"
 #include "hardware/device/lk_motor.hpp"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -15,6 +17,8 @@
 #include <pluginlib/class_list_macros.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rmcs_executor/component.hpp>
+#include <rmcs_msgs/switch.hpp>
+#include <std_msgs/msg/int32.hpp>
 
 namespace rmcs_core::hardware {
 
@@ -107,6 +111,12 @@ class ArmPinocchioTest final
             }
         }
 
+        void uart_receive_callback(const Spec::Uart& uart, const View::Uart& data) override {
+            // The DR16 frame has no header; hand the whole payload to the parser.
+            if (uart == Spec::kUarts.kDbus)
+                hardware_.dr16_.store_status(data.uart_data);
+        }
+
         static constexpr const Spec::Can& motor_can(std::size_t joint_index) {
             return joint_index < 3 ? Spec::kCans.kCan0 : Spec::kCans.kCan1;
         }
@@ -132,13 +142,31 @@ public:
         , joints_{{{*this, *command_, "/arm/joint_1/motor"}, {*this, *command_, "/arm/joint_2/motor"}, {*this, *command_, "/arm/joint_3/motor"}, {*this, *command_, "/arm/joint_4/motor"}, {*this, *command_, "/arm/joint_5/motor"}, {*this, *command_, "/arm/joint_6/motor"}}}
         , joint2_encoder_(*this, "/arm/joint_2/encoder") {
         using namespace device;
-        register_output("/arm/hardware_ready", ready_, false);
+        register_output("/arm/hardware_ready", all_feedback_fresh_, false);
+        register_output("/remote/switch/left", remote_switch_left_, rmcs_msgs::Switch::UNKNOWN);
+        register_output("/remote/switch/right", remote_switch_right_, rmcs_msgs::Switch::UNKNOWN);
+
+        // One-shot report of raw encoder readings, used for joint zero calibration.
+        gimbal_calibrate_subscription_ = create_subscription<std_msgs::msg::Int32>(
+            "/gimbal/calibrate", rclcpp::QoS{0}, [this](std_msgs::msg::Int32::UniquePtr&& msg) {
+                gimbal_calibrate_subscription_callback(std::move(msg));
+            });
+
         const auto timeout = get_parameter("feedback_timeout_ms").as_int();
         if (timeout <= 0)
             throw std::invalid_argument("feedback_timeout_ms must be positive");
         feedback_timeout_ = std::chrono::milliseconds(timeout);
         for (auto& time : last_feedback_)
             time.store(TimePoint::min(), std::memory_order_relaxed);
+
+        // Debug print of the torque command in the motor frame, see update().
+        for (std::size_t i = 0; i < num_axes; ++i)
+            register_input(
+                "/arm/joint_" + std::to_string(i + 1) + "/motor/control_torque",
+                commanded_torque_[i]);
+
+        // Must match the reverse() flags below: joints 1, 2 and 6 are reversed.
+        motor_direction_ = {-1.0, -1.0, 1.0, 1.0, 1.0, -1.0};
 
         const auto zero = [this](int joint) {
             return static_cast<int>(
@@ -175,10 +203,32 @@ public:
         for (auto& joint : joints_)
             joint.update();
         joint2_encoder_.update();
-        *ready_ = feedback_fresh();
+
+        dr16_.update_status();
+        *remote_switch_left_ = dr16_.switch_left();
+        *remote_switch_right_ = dr16_.switch_right();
+
+        *all_feedback_fresh_ = feedback_fresh();
+
+        // Debug output: torque in the motor frame, at most once per second.
+        RCLCPP_INFO_THROTTLE(
+            get_logger(), *get_clock(), 1000,
+            "motor torque: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f] N*m", motor_torque(0),
+            motor_torque(1), motor_torque(2), motor_torque(3), motor_torque(4), motor_torque(5));
     }
 
 private:
+    void gimbal_calibrate_subscription_callback(std_msgs::msg::Int32::UniquePtr) {
+        RCLCPP_INFO(
+            get_logger(), ".joint_1=%f,.joint_2=%f,.joint_3=%f,.joint_4=%f,.joint_5=%f,.joint_6=%f",
+            joints_[0].get_angle(), joint2_encoder_.get_angle(), joints_[2].get_angle(),
+            joints_[3].get_angle(), joints_[4].get_angle(), joints_[5].get_angle());
+        RCLCPP_INFO(
+            get_logger(), ".joint_1=%d,.joint_2=%d,.joint_3=%d,.joint_4=%d,.joint_5=%d,.joint_6=%d",
+            joints_[0].get_raw_angle(), joint2_encoder_.get_raw_angle(), joints_[2].get_raw_angle(),
+            joints_[3].get_raw_angle(), joints_[4].get_raw_angle(), joints_[5].get_raw_angle());
+    }
+
     bool feedback_fresh() const {
         const auto now = Clock::now();
         for (const auto& feedback : last_feedback_) {
@@ -194,10 +244,23 @@ private:
             arm_board_->transmit(enabled);
     }
 
+    // Torque the driver sends for joint i: direction applied, clamped to the motor limit.
+    // A NaN command stays NaN, so a disabled controller remains visible in the log.
+    double motor_torque(std::size_t i) {
+        const double limit = joints_[i].get_max_torque();
+        return std::clamp(motor_direction_[i] * (*commanded_torque_[i]), -limit, limit);
+    }
+
     std::shared_ptr<Command> command_;
     std::array<device::LKMotor, num_axes> joints_;
+    std::array<InputInterface<double>, num_axes> commanded_torque_;
+    std::array<double, num_axes> motor_direction_{};
     device::Encoder joint2_encoder_;
-    OutputInterface<bool> ready_;
+    device::Dr16 dr16_;
+    OutputInterface<bool> all_feedback_fresh_;
+    OutputInterface<rmcs_msgs::Switch> remote_switch_left_;
+    OutputInterface<rmcs_msgs::Switch> remote_switch_right_;
+    rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr gimbal_calibrate_subscription_;
     std::chrono::milliseconds feedback_timeout_{100};
     std::array<std::atomic<TimePoint>, num_axes + 1> last_feedback_;
     std::unique_ptr<ArmBoard> arm_board_;
