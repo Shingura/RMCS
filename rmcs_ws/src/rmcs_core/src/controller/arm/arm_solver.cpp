@@ -176,8 +176,6 @@ private:
                     + std::to_string(model.nv));
             }
 
-            std::array<pinocchio::JointIndex, num_axis> joint_ids{};
-
             for (std::size_t i = 0; i < num_axis; ++i) {
                 const std::string joint_name = "joint_" + std::to_string(i + 1);
                 const auto joint_id = model.getJointId(joint_name);
@@ -192,7 +190,7 @@ private:
                         "Pinocchio joint is not one-DOF: " + joint_name);
                 }
 
-                joint_ids[i] = joint_id;
+                building_model->joint_ids[i] = joint_id;
 
                 RCLCPP_INFO(
                     this->get_logger(),

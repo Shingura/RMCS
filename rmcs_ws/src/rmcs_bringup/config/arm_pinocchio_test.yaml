@@ -9,7 +9,7 @@ rmcs_executor:
 
 arm_test_hardware:
   ros__parameters:
-    connect_hardware: false
+    connect_hardware: true
     feedback_timeout_ms: 100
     # Copied from lunar_rover_engineer; replace the serial and zero points for the bench arm.
     # The board is now an RMCS Board Lite, so this string must be replaced by that board's serial.
