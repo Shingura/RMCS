@@ -36,8 +36,8 @@ printf 'APT configured: proxy=%s, Ubuntu mirror=%s, Ubuntu ports mirror=%s\n' \
 # Configure proxy variables for interactive zsh sessions. Keep this block
 # managed and replace it on every run so reopening the container does not
 # append duplicate exports to ~/.zshrc.
-terminal_http_proxy="http://127.0.0.1:8899"
-terminal_all_proxy="socks5://127.0.0.1:1080"
+terminal_http_proxy="http://127.0.0.1:7890"
+terminal_all_proxy="socks5://127.0.0.1:7890"
 zshrc_file="${HOME}/.zshrc"
 proxy_block_start="# >>> RMCS terminal proxy >>>"
 proxy_block_end="# <<< RMCS terminal proxy <<<"

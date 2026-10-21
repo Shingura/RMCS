@@ -76,3 +76,6 @@ develop_ws
 
 # Ignore camera cache files
 cache
+
+# Ignore agent files
+.agents/
