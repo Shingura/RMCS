@@ -113,7 +113,7 @@ class ArmPinocchioTest final
             for (std::size_t i = phase_; i < num_axes; i += 2) {
                 const auto& can = motor_can(i);
                 auto packet = enabled ? hardware_.joints_[i].generate_torque_command()
-                                        : device::LKMotor::lk_zero_torque_command();
+                                      : device::LKMotor::lk_zero_torque_command();
                 tx.can_transmit(can, {.can_id = can_ids_[i], .can_data = packet.as_bytes()});
             }
             phase_ = 1 - phase_;
@@ -160,7 +160,7 @@ class ArmPinocchioTest final
 
         static constexpr std::array<std::uint32_t, num_axes> can_ids_{0x141, 0x142, 0x143,
                                                                       0x144, 0x145, 0x141};
-        static constexpr std::uint32_t joint2_encoder_can_id_ = 0x200;
+        static constexpr std::uint32_t joint2_encoder_can_id_ = 0x205;
 
         ArmPinocchioTest& hardware_;
         std::size_t phase_{0};
@@ -174,8 +174,9 @@ public:
               get_component_name(),
               rclcpp::NodeOptions{}.automatically_declare_parameters_from_overrides(true))
         , command_(create_partner_component<Command>(get_component_name() + "_command", *this))
-        , torque_watcher_(create_partner_component<TorqueWatcher>(
-              get_component_name() + "_torque_watcher", *this))
+        , torque_watcher_(
+              create_partner_component<TorqueWatcher>(
+                  get_component_name() + "_torque_watcher", *this))
         , joints_{{{*this, *command_, "/arm/joint_1/motor"}, {*this, *command_, "/arm/joint_2/motor"}, {*this, *command_, "/arm/joint_3/motor"}, {*this, *command_, "/arm/joint_4/motor"}, {*this, *command_, "/arm/joint_5/motor"}, {*this, *command_, "/arm/joint_6/motor"}}}
         , joint2_encoder_(*this, "/arm/joint_2/encoder") {
         using namespace device;
