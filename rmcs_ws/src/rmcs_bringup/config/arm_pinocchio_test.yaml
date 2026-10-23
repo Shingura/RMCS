@@ -19,11 +19,11 @@ arm_test_hardware:
     #   kCan1: joint 4..6 (0x144, 0x145, 0x141)
     #   kCan2: joint 2 absolute encoder (0x200)
     joint1_zero_point: 14669
-    joint2_zero_point: 39433
-    joint3_zero_point: 29072
-    joint4_zero_point: 33493
-    joint5_zero_point: 60137
-    joint6_zero_point: 12793
+    joint2_zero_point: 42651
+    joint3_zero_point: 57105
+    joint4_zero_point: 30384
+    joint5_zero_point: 25622
+    joint6_zero_point: 56059
 
 arm_solver:
   ros__parameters:

@@ -314,7 +314,7 @@ private:
         constexpr double l_3m = 0.08;
 
         const double l1 = *link_length[1];
-        const double l2 = *link_length[2];
+        const double l2 = *link_length[3];
         const double s12 = sin(theta_1 + theta_2);
 
         const double x = sin(theta_3) * cos(theta_4);
