@@ -25,7 +25,8 @@
                 "mhutchie.git-graph",
                 "oderwat.indent-rainbow",
                 "twxs.cmake",
-                "openai.chatgpt"
+                "openai.chatgpt",
+                "Anthropic.claude-code"
             ]
         }
     }
