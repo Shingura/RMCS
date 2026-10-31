@@ -80,3 +80,7 @@ cache
 # Ignore agent files
 .agents/
 .codebuddy/
+.claude
+
+# v1 of the energy trace package, kept locally for comparison with rmcs_energy_trace_v2
+/rmcs_ws/src/rmcs_energy_trace/
