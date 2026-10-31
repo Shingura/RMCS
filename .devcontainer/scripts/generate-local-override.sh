@@ -84,6 +84,11 @@ add_mount "$HOME/.local/share/lark-cli" "/home/ubuntu/.local/share/lark-cli"
 add_mount "$HOME/.local/share/opencode" "/home/ubuntu/.local/share/opencode"
 add_ro_mount "$HOME/.agents/skills" "/home/ubuntu/.agents/skills"
 
+devices=""
+if command -v nvidia-ctk >/dev/null 2>&1 && nvidia-ctk cdi list 2>/dev/null | grep -qx 'nvidia.com/gpu=all'; then
+    devices="      - nvidia.com/gpu=all\n"
+fi
+
 mkdir -p "$generated_dir"
 
 {
@@ -101,5 +106,9 @@ mkdir -p "$generated_dir"
         printf '%b' "$mounts"
     else
         printf '%s\n' '      []'
+    fi
+    if [ -n "$devices" ]; then
+        printf '%s\n' '    devices:'
+        printf '%b' "$devices"
     fi
 } > "$output_file"
