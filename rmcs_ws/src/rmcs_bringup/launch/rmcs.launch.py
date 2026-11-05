@@ -56,15 +56,33 @@ class MyLaunchDescriptionEntity(LaunchDescriptionEntity):
             "demo.launch.py"
         )
         
+        if robot_name != "energy_trace_test":
+            entities.append(
+                IncludeLaunchDescription(
+                    PythonLaunchDescriptionSource(demo_launch_path),
+                    launch_arguments={
+                        "use_rviz": LaunchConfiguration("use_rviz")
+                    }.items(),
+                )
+            )
+
+        realsense_launch_path = os.path.join(
+            FindPackageShare("realsense2_camera").perform(context),
+            "launch",
+            "rs_launch.py",
+        )
         entities.append(
             IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(demo_launch_path),
+                PythonLaunchDescriptionSource(realsense_launch_path),
                 launch_arguments={
-                    "use_rviz": LaunchConfiguration("use_rviz")
+                    "enable_sync": "true",
+                    "align_depth.enable": "true",
+                    # 分辨率与组件 YAML 里的内参对应，改动时需同步
+                    "rgb_camera.color_profile": "640,480,30",
+                    "depth_module.depth_profile": "640,480,30",
                 }.items(),
             )
         )
-       
 
         return entities
 

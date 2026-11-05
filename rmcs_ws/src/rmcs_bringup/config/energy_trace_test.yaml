@@ -1,0 +1,12 @@
+rmcs_executor:
+  ros__parameters:
+    update_rate: 1000.0
+    components:
+      - rmcs_energy_trace_v2::EnergyTraceComponent -> energy_trace
+
+energy_trace:
+  ros__parameters:
+    network_path: /workspaces/RMCS/rmcs_ws/src/rmcs_energy_trace_v2/assets/yolo11n_seg_v1.xml
+    threads: 4
+    color_topic: /camera/camera/color/image_raw
+    depth_topic: /camera/camera/aligned_depth_to_color/image_raw
