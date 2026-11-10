@@ -6,5 +6,4 @@ rmcs_executor:
 
 energy_trace:
   ros__parameters:
-    network_path: /workspaces/RMCS/rmcs_ws/src/rmcs_energy_trace_v2/assets/yolo11n_seg_v1.xml
     threads: 4
