@@ -198,7 +198,7 @@ class MyLaunchDescriptionEntity(LaunchDescriptionEntity):
                 )
             )
 
-        if robot_name == "energy_trace_test":
+        if robot_name in ("energy_trace_test", "lunar_rover_energy_trace"):
             realsense_launch_path = os.path.join(
                 FindPackageShare("realsense2_camera").perform(context),
                 "launch",

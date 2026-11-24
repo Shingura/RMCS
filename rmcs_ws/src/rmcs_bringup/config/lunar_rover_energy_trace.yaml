@@ -1,0 +1,268 @@
+rmcs_bringup:
+  ros__parameters:
+    arm_type: "arm_6dof"
+
+rmcs_executor:
+  ros__parameters:
+    update_rate: 1000.0
+    components:
+      - rmcs_core::hardware::LunarRoverEngineer -> engineer_hardware
+      - rmcs_core::controller::arm::ArmConfig -> arm_config
+      - rmcs_core::controller::arm::ArmController -> arm_controller
+      - rmcs_core::controller::arm::ArmSolver -> arm_solver
+
+      - rmcs_core::controller::pid::PidController -> gripper_angle_pid_controller
+      - rmcs_core::controller::pid::PidController -> gripper_velocity_pid_controller
+      - rmcs_core::controller::pid::PidController -> image_pitch_angle_pid_controller
+      - rmcs_core::controller::pid::PidController -> image_pitch_velocity_pid_controller
+
+      - rmcs_core::controller::leg::LegController -> leg_controller
+
+      - rmcs_core::controller::chassis::LunarRoverChassisController -> chassis_controller
+      - rmcs_core::controller::chassis::SteeringWheelController -> steering_wheel_controller
+            
+      - rmcs_core::controller::pid::PidController -> leg_omni_l_velocity_controller
+      - rmcs_core::controller::pid::PidController -> leg_omni_r_velocity_controller
+
+      - rmcs_core::controller::pid::ErrorPidController -> big_yaw_angle_error_pid_controller
+      - rmcs_core::controller::pid::PidController -> big_yaw_velocity_pid_controller
+
+      - rmcs_core::controller::pid::ErrorPidController -> leg_lb_angle_error_pid_controller
+      - rmcs_core::controller::pid::PidController -> leg_lb_velocity_pid_controller
+      - rmcs_core::controller::pid::ErrorPidController -> leg_rb_angle_error_pid_controller
+      - rmcs_core::controller::pid::PidController -> leg_rb_velocity_pid_controller
+
+      # - rmcs::RealSenseCapturerComponent -> realsense_capturer
+      - rmcs_energy_trace_v2::EnergyTraceComponent -> energy_trace
+
+      - rmcs_core::broadcaster::ValueBroadcaster -> value_broadcaster
+engineer_hardware:
+  ros__parameters:
+    board_serial_arm_board: "D4-D354-B7C8-A457-ECB1-11A9-998E"  
+    board_serial_encoder_board: "D4-9C35-EDF1-2B20-7AE6-4ED0-8308"
+    board_serial_left_board: "AF-BE99-F77D-BDAA-8AE1-AE22-EF6E-78F4-6EAC"
+    board_serial_right_board: "AF-EEF5-24BA-6675-F1B1-C797-50AF-869C-870E"
+    gripper_zero_point: 26298
+    image_pitch_zero_point: 43131
+    joint6_zero_point: 11970
+    joint5_zero_point: 60200
+    joint4_zero_point: 32573
+    joint3_zero_point: 28500
+    joint2_zero_point: 39451
+    joint1_zero_point: 14412
+    steering_lf_zero_point: 1343
+    steering_lb_zero_point: 4096
+    steering_rb_zero_point: 0
+    steering_rf_zero_point: 4096
+    leg_lf_motor_zero_point: 7950
+    leg_lb_ecd_zero_point: 153149
+    leg_rb_ecd_zero_point: 221758
+    leg_rf_motor_zero_point: 46800
+    big_yaw_zero_point: 40944
+
+arm_controller:
+  ros__parameters:
+    chassis_type: lunar_rover
+    gripper_step: 7.0
+    gripper_open_angle: 7.9
+    gripper_close_angle: 0.4
+    image_pitch_qmin: -0.7
+    image_pitch_qmax: 2.2
+
+arm_solver:
+  ros__parameters:
+    controller_list: [pid, gravity, friction]
+    joint_6_angle_kp: 120.00
+    joint_6_angle_ki: 0.0
+    joint_6_angle_kd: 0.04
+    joint_6_vel_kp: 0.0908
+    joint_6_vel_ki: 0.000
+    joint_6_vel_kd: 0.030
+
+leg_controller:
+  ros__parameters:
+    forward_x_position_in_FourWheel: 238.0
+    forward_x_position_in_SixWheel: 250.0
+    backward_x_position_in_SixWheel: 221.0
+    tof_b: 0.51
+    lf_angle_pid: [2000.0, 0.0,18.0]
+    lf_vel_pid: [1.08, 0.00, 0.1]
+    rf_angle_pid: [2000.0, 0.0, 18.0]
+    rf_vel_pid: [1.08, 0.00, 0.1]
+    up_one_stairs: 
+      params:
+        initial: [1.90070, 1.65, 0.0, 2000.0]
+        press: [0.34, 0.51, -500.0, 120.0]
+        press_wait : [0.34,0.51, -100.0, 280.0]
+        lift: [1.016670, 1.150821, -100.0, 100.0]
+    up_two_stairs:
+      params:
+        initial: [1.90070, 1.65, 0.0, 2000.0]
+        press: [0.34, 0.51, -500.0, 150.0]
+        press_wait : [0.34,0.51, -100.0, 280.0]
+        lift: [1.016670, 1.150821, -200.0, 150.0]
+        lift_wait: [1.400270, 1.410, -100.0, 80.0]
+        initial_again: [1.90070, 1.65, -200.0, 100.0]
+        initial_wait : [1.90070, 1.65, -100.0, 50.0]
+        press_again: [0.34, 0.51, -500.0, 350.0]
+        lift_again: [0.956670, 1.350821, -200.0, 80.0] 
+
+
+
+gripper_angle_pid_controller:
+  ros__parameters:
+    measurement: /arm/gripper/motor/angle
+    setpoint: /arm/gripper/target_theta
+    control: /arm/gripper/control_vel
+    kp: 38.0
+    ki: 0.0
+    kd: 0.03
+
+gripper_velocity_pid_controller:
+  ros__parameters:
+    measurement: /arm/gripper/motor/velocity
+    setpoint: /arm/gripper/control_vel
+    control: /arm/gripper/motor/control_torque
+    kp: 0.3
+    ki: 0.0
+    kd: 0.01
+    output_max: 1.5
+
+
+image_pitch_angle_pid_controller:
+  ros__parameters:
+    measurement: /arm/image_pitch/motor/angle
+    setpoint: /arm/image_pitch/target_theta
+    control: /arm/image_pitch/control_vel
+    kp: 200.0
+    ki: 0.0
+    kd: 0.0
+
+image_pitch_velocity_pid_controller:
+  ros__parameters:
+    measurement: /arm/image_pitch/motor/velocity
+    setpoint: /arm/image_pitch/control_vel
+    control: /arm/image_pitch/motor/control_torque
+    kp: 0.1
+    ki: 0.0
+    kd: 0.0
+
+leg_omni_l_velocity_controller:
+  ros__parameters:
+    measurement: /leg/omni/l/velocity
+    setpoint: /leg/omni/l/target_vel
+    control: /leg/omni/l/control_torque
+    kp: 0.7
+    ki: 0.0
+    kd: 0.0
+
+leg_omni_r_velocity_controller:
+  ros__parameters:
+    measurement: /leg/omni/r/velocity
+    setpoint: /leg/omni/r/target_vel
+    control: /leg/omni/r/control_torque
+    kp: 0.7
+    ki: 0.0
+    kd: 0.0
+
+big_yaw_angle_error_pid_controller:
+  ros__parameters:
+    measurement: /chassis/big_yaw/target_angle_error
+    control: /chassis/big_yaw/control_vel
+    kp: 61.3
+    ki: 0.0
+    kd: 2.6
+big_yaw_velocity_pid_controller:
+  ros__parameters:
+    measurement: /chassis/big_yaw/velocity
+    setpoint: /chassis/big_yaw/control_vel
+    control: /chassis/big_yaw/control_torque
+    kp: 3.99
+    ki: 0.0
+    kd: 0.039
+
+leg_lb_angle_error_pid_controller:
+  ros__parameters:
+    measurement: /leg/joint/lb/control_theta_error
+    control: /leg/joint/lb/control_vel
+    kp: 6000.0
+    ki: 0.0
+    kd: 0.0
+leg_lb_velocity_pid_controller:
+  ros__parameters:
+    measurement: /leg/joint/lb/velocity
+    setpoint: /leg/joint/lb/control_vel
+    control: /leg/joint/lb/control_torque
+    kp: 0.08
+    ki: 0.0
+    kd: 0.0
+    output_max: 40.0
+
+leg_rb_angle_error_pid_controller:
+  ros__parameters:
+    measurement: /leg/joint/rb/control_theta_error
+    control: /leg/joint/rb/control_vel
+    kp: 6000.0
+    ki: 0.0
+    kd: 0.0
+
+leg_rb_velocity_pid_controller:
+  ros__parameters:
+    measurement: /leg/joint/rb/velocity
+    setpoint: /leg/joint/rb/control_vel
+    control: /leg/joint/rb/control_torque
+    kp: 0.08
+    ki: 0.0
+    kd: 0.0
+    output_max: 40.0
+
+steering_wheel_controller:
+  ros__parameters:
+    mess: 35.0
+    moment_of_inertia: 2.0
+    vehicle_radius: 0.3238
+    wheel_radius: 0.055
+    friction_coefficient: 0.7
+    k1: 2.958580e+00
+    k2: 3.082190e-03
+    no_load_power: 15.37
+
+
+energy_trace:
+  ros__parameters:
+    threads: 4
+    camera_translation: [0.0, 0.0, 0.0]
+    camera_rpy: [0.0, 0.0, 0.0]
+
+value_broadcaster:
+  ros__parameters:
+    forward_list:
+      - "four_wheel_f"
+      - "six_wheel_f"
+      - "up_stairs_f"
+      - "/leg/joint/rf/angle"
+      - "/leg/joint/lf/angle"
+      - "/leg/joint/rf/velocity"
+      - "/leg/joint/lf/velocity"
+      - "/leg/joint/lf/torque"
+      - "/leg/joint/lf/control_torque"
+      - "/leg/joint/rf/torque"
+      - "/leg/joint/rf/control_torque"
+      - "/leg/encoder/lb/angle"
+      - "/arm/gripper/motor/velocity"
+      - "/arm/gripper/motor/torque"
+      - "/arm/gripper/target_theta"
+      - "/arm/gripper/motor/control_torque"
+      - "/arm/gripper/motor/angle"
+      - "pitch_imu_angle"
+      - "/leg/pitch_imu_angle_offsetted"
+      - "/arm/joint_6/motor/velocity"
+      - "/arm/joint_6/motor/angle"
+      - "/arm/joint_6/motor/torque"
+      - "/arm/joint_1/motor/velocity"
+      - "/arm/joint_1/motor/angle"
+      - "/arm/joint_1/motor/torque"
+      - "/arm/joint_2/motor/velocity"
+      - "/arm/joint_2/motor/angle"
+      - "/arm/joint_2/motor/torque"
+    
