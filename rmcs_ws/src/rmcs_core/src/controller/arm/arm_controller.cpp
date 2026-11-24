@@ -85,7 +85,7 @@ public:
         register_output("/arm/image_pitch/target_theta", image_pitch_target_theta_, NAN);
         register_output("/arm/custom_big_yaw", custom_big_yaw_output_, 0.0);
 
-        register_input("/auto_mine/pillar_pose", pillar_pose_);
+        register_input("/auto_mine/pillar_pose", pillar_pose_, false);
 
         log_dog_.reset(1000);
 
