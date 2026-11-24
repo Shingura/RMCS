@@ -198,6 +198,24 @@ class MyLaunchDescriptionEntity(LaunchDescriptionEntity):
                 )
             )
 
+        if robot_name == "energy_trace_test":
+            realsense_launch_path = os.path.join(
+                FindPackageShare("realsense2_camera").perform(context),
+                "launch",
+                "rs_launch.py",
+            )
+            entities.append(
+                IncludeLaunchDescription(
+                    PythonLaunchDescriptionSource(realsense_launch_path),
+                    launch_arguments={
+                        "enable_sync": "true",
+                        "align_depth.enable": "true",
+                        "rgb_camera.color_profile": "640,480,30",
+                        "depth_module.depth_profile": "640,480,30",
+                    }.items(),
+                )
+            )
+
         return entities
 
 

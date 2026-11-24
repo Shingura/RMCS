@@ -1,0 +1,9 @@
+rmcs_executor:
+  ros__parameters:
+    update_rate: 1000.0
+    components:
+      - rmcs_energy_trace_v2::EnergyTraceComponent -> energy_trace
+
+energy_trace:
+  ros__parameters:
+    threads: 4
