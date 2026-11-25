@@ -231,7 +231,7 @@ steering_wheel_controller:
 energy_trace:
   ros__parameters:
     threads: 4
-    camera_translation: [0.0, 0.0, 0.0]
+    camera_translation: [-0.44874, 0.0, 0.560]
     camera_rpy: [0.0, 0.0, 0.0]
 
 value_broadcaster:
