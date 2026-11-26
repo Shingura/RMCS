@@ -1,12 +1,24 @@
 #include "controller/pid/pid_calculator.hpp"
+#include "std_msgs/msg/string.hpp"
 #include <Eigen/Dense>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
+#include <cstddef>
+#include <exception>
+#include <memory>
 #include <numbers>
+#include <pinocchio/algorithm/rnea.hpp>
+#include <pinocchio/multibody/data.hpp>
+#include <pinocchio/multibody/fwd.hpp>
+#include <pinocchio/multibody/model.hpp>
+#include <pinocchio/parsers/urdf.hpp>
 #include <rclcpp/logging.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/subscription.hpp>
 #include <rmcs_executor/component.hpp>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <unordered_set>
@@ -20,6 +32,11 @@ class ArmSolver final
     static constexpr int joint1_index      = 0;
     static constexpr int joint4_index      = 3;
     using TorqueVec                       = Eigen::Array<double, num_axis, 1>;
+
+    struct PinocchioModel {
+        pinocchio::Model pinocchio_model;
+        std::array<pinocchio::JointIndex, num_axis> joint_ids{};
+    };
 
 public:
     explicit ArmSolver()
@@ -59,6 +76,12 @@ public:
             register_input(link_prefix + "/length", link_length[i]);
         }
 
+        urdf_subscription = this->create_subscription<std_msgs::msg::String>(
+            "/robot_description", rclcpp::QoS(1).transient_local().reliable(),
+            [this](const std_msgs::msg::String::ConstSharedPtr& msg) {
+                load_pinocchio_model(msg->data);
+            });
+
         register_input("urdf_loaded", is_loaded);
         register_input("/arm/joint_4/position", joint4_position);
         joint1_velocity_target_ = this->get_parameter("joint1_velocity_target").as_double();
@@ -69,17 +92,42 @@ public:
     }
 
     void update() override {
+        const auto model = latest_received_model_.load(std::memory_order_acquire);
+
         static constexpr int kStartupHoldCycles = 1000;
         TorqueVec tau_cmd;
         tau_cmd.setZero();
         static int startup_cycle_count_ = 0;
         if (startup_cycle_count_ < kStartupHoldCycles) {
             ++startup_cycle_count_;
-            tau_cmd                      = calculate_zero_torque();
+            tau_cmd = calculate_zero_torque();
+            for (std::size_t i = 0; i < num_axis; ++i) {
+                *joint_control_torque[i] = tau_cmd[i];
+            }
             return;
         }
-        if (!*is_loaded)
+        if (!*is_loaded || !model) {
+            tau_cmd = calculate_zero_torque();
+            for (std::size_t i = 0; i < num_axis; ++i) {
+                *joint_control_torque[i] = tau_cmd[i];
+            }
             return;
+        }
+
+        if (in_use_model_ != model) {
+            const auto& pinocchio_model = model->pinocchio_model;
+
+            in_use_data_ = std::make_unique<pinocchio::Data>(pinocchio_model);
+            joint_position_.setZero(pinocchio_model.nq);
+
+            for (std::size_t i = 0; i < num_axis; ++i) {
+                const auto joint_id = model->joint_ids[i];
+                q_index_[i]         = static_cast<Eigen::Index>(pinocchio_model.idx_qs[joint_id]);
+                v_index_[i]         = static_cast<Eigen::Index>(pinocchio_model.idx_vs[joint_id]);
+            }
+
+            in_use_model_ = model;
+        }
 
         for (auto fn : controller_list) {
             tau_cmd += (this->*fn)();
@@ -95,6 +143,54 @@ public:
     }
 
 private:
+    /// @brief /robot_description 的订阅回调，从 URDF 的 XML 建模
+    void load_pinocchio_model(const std::string& urdf_xml) {
+        auto building_model = std::make_shared<PinocchioModel>();
+
+        try {
+            pinocchio::urdf::buildModelFromXML(urdf_xml, building_model->pinocchio_model);
+
+            auto& model = building_model->pinocchio_model;
+
+            if ((model.nq != static_cast<int>(num_axis))
+                || (model.nv != static_cast<int>(num_axis))) {
+                throw std::runtime_error(
+                    "Expected a " + std::to_string(num_axis) + "-DOF model, but got nq="
+                    + std::to_string(model.nq) + ", nv=" + std::to_string(model.nv));
+            }
+
+            for (std::size_t i = 0; i < num_axis; ++i) {
+                const std::string joint_name = "joint_" + std::to_string(i + 1);
+                const auto joint_id          = model.getJointId(joint_name);
+
+                if (joint_id == 0) {
+                    throw std::runtime_error("Pinocchio joint not found: " + joint_name);
+                }
+
+                if (model.nqs[joint_id] != 1 || model.nvs[joint_id] != 1) {
+                    throw std::runtime_error("Pinocchio joint is not one-DOF: " + joint_name);
+                }
+
+                building_model->joint_ids[i] = joint_id;
+
+                RCLCPP_INFO(
+                    this->get_logger(),
+                    "Pinocchio joint[%zu]: name=%s, id=%zu, q_index=%d, v_index=%d", i,
+                    joint_name.c_str(), joint_id, model.idx_qs[joint_id], model.idx_vs[joint_id]);
+            }
+
+            model.gravity.linear() = Eigen::Vector3d(0.0, 0.0, -9.81);
+
+            RCLCPP_INFO(
+                get_logger(), "Pinocchio model loaded: nq=%d, nv=%d, joints=%d", model.nq, model.nv,
+                model.njoints);
+
+            latest_received_model_.store(building_model, std::memory_order_release);
+        } catch (const std::exception& err) {
+            RCLCPP_ERROR(this->get_logger(), "Pinocchio URDF parse failed: %s", err.what());
+            return;
+        }
+    }
     Eigen::Array<double, 6, 1> calculate_pid() {
         const auto normalize_angle = [](double angle) {
             while (angle > std::numbers::pi) {
@@ -182,6 +278,29 @@ private:
         return tau_f;
     };
 
+    TorqueVec calculate_gravity_compensation_with_pinocchio() {
+        TorqueVec tau_g;
+        tau_g.setZero();
+
+        if (!in_use_model_ || !in_use_data_)
+            return tau_g;
+
+        const auto& pinocchio_model = in_use_model_->pinocchio_model;
+
+        for (std::size_t i = 0; i < num_axis; ++i) {
+            joint_position_(q_index_[i]) = *joint_theta[i];
+        }
+
+        const Eigen::VectorXd& gravity =
+            pinocchio::computeGeneralizedGravity(pinocchio_model, *in_use_data_, joint_position_);
+
+        for (std::size_t i = 0; i < num_axis; ++i) {
+            tau_g(i) = gravity(v_index_[i]);
+        }
+
+        return tau_g;
+    }
+
     Eigen::Array<double, 6, 1> calculate_gravity_compensation() {
         // The gravity compensation theoretical calculation for joint1 and joint6 is 0.
         static constexpr double g       = 9.81;
@@ -238,8 +357,9 @@ private:
     }
     using controller_type = Eigen::Array<double, 6, 1> (ArmSolver::*)();
 
-    static constexpr std::array<std::tuple<std::string_view, controller_type>, 4> term_table_{
+    static constexpr std::array<std::tuple<std::string_view, controller_type>, 5> term_table_{
         {{"gravity", &ArmSolver::calculate_gravity_compensation},
+         {"gravity_pinocchio", &ArmSolver::calculate_gravity_compensation_with_pinocchio},
          {"pid", &ArmSolver::calculate_pid},
          {"friction", &ArmSolver::calculate_friction_compensation},
          {"zero_torque", &ArmSolver::calculate_zero_torque}}
@@ -271,10 +391,23 @@ private:
             if (!matched) {
                 RCLCPP_ERROR(
                     this->get_logger(),
-                    "Unknown enable_terms entry: '%s' (allowed: gravity, pd, friction)", l.c_str());
+                    "Unknown enable_terms entry: '%s' (allowed: gravity, gravity_pinocchio, pid, "
+                    "friction, zero_torque)",
+                    l.c_str());
             }
         }
     }
+
+    std::atomic<std::shared_ptr<const PinocchioModel>> latest_received_model_{nullptr};
+    std::shared_ptr<const PinocchioModel> in_use_model_;
+    std::unique_ptr<pinocchio::Data> in_use_data_;
+
+    Eigen::VectorXd joint_position_;
+    std::array<Eigen::Index, num_axis> q_index_{};
+    std::array<Eigen::Index, num_axis> v_index_{};
+
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr urdf_subscription;
+
     Eigen::Array<pid::PidCalculator, 6, 1> joint_angle_pid_controller;
     Eigen::Array<pid::PidCalculator, 6, 1> joint_vel_pid_controller;
 

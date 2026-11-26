@@ -22,7 +22,8 @@ arm_hardware:
 
 arm_solver:
   ros__parameters:
-    controller_list: [gravity]
+    # controller_list: [gravity]
+    controller_list: [gravity_pinocchio]
     joint1_velocity_target: 0.0
     joint4_velocity_target: 0.0
 

@@ -46,7 +46,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
   ${PROJECT_SOURCE_DIR}/src
 )
 
-target_link_libraries(${PROJECT_NAME} Eigen3::Eigen librmcs-sdk atomic)
+target_link_libraries(${PROJECT_NAME} Eigen3::Eigen librmcs-sdk atomic pinocchio::pinocchio)
 
 pluginlib_export_plugin_description_file(rmcs_executor plugins.xml)
 
